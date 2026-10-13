@@ -1,0 +1,10 @@
+.git/
+.wyld/
+.pytest_cache/
+tests/
+docs/
+*.pyc
+__pycache__/
+dist/
+build/
+.venv/

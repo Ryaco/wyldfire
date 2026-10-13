@@ -1,0 +1,26 @@
+[build-system]
+requires = ["flit_core >=3.2,<4"]
+build-backend = "flit_core.buildapi"
+
+[project]
+name = "wyldfire"
+version = "0.1.0"
+description = "An opinionated finite-state-machine CLI for solo indie game developers"
+readme = "README.md"
+requires-python = ">=3.11"
+authors = [{name = "Benjamin Kean Anderson / Wyldfire contributors"}]
+dependencies = [
+    "click>=8.0",
+]
+
+[project.optional-dependencies]
+server = [
+    "fastapi>=0.100.0",
+    "uvicorn>=0.20.0",
+]
+test = [
+    "pytest>=7.0",
+]
+
+[project.scripts]
+wyld = "wyldfire.cli.main:cli"
