@@ -9,12 +9,20 @@ try:
 except ImportError:
     # If fastapi not installed in local environment, provide placeholder
     FastAPI = None
+    Depends = lambda *args, **kwargs: None
+    HTTPException = None
+    Header = lambda *args, **kwargs: None
+    status = None
+    BaseModel = object
 
-from wyldfire.server.config import SERVER_TOKEN
 from wyldfire.server import db
 
 
 def create_app():
+    server_token = os.environ.get("WYLD_SERVER_TOKEN")
+    if not server_token:
+        raise RuntimeError("WYLD_SERVER_TOKEN environment variable must be set")
+
     if FastAPI is None:
         raise RuntimeError("FastAPI is not installed. Install with 'pip install wyldfire[server]'")
 
@@ -33,7 +41,7 @@ def create_app():
                 detail="Invalid Authorization header scheme",
             )
         token = authorization[len(prefix):].strip()
-        expected = os.environ.get("WYLD_SERVER_TOKEN", SERVER_TOKEN)
+        expected = os.environ.get("WYLD_SERVER_TOKEN", server_token)
         if token != expected:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
@@ -71,7 +79,15 @@ def create_app():
     return app
 
 
+class MissingTokenApp:
+    def __call__(self, scope, receive, send):
+        raise RuntimeError("WYLD_SERVER_TOKEN environment variable must be set")
+
+
 # Lazy-loaded instance for uvicorn
 app = None
 if FastAPI is not None:
-    app = create_app()
+    if os.environ.get("WYLD_SERVER_TOKEN"):
+        app = create_app()
+    else:
+        app = MissingTokenApp()

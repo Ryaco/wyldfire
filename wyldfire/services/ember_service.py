@@ -1,9 +1,11 @@
 """Ember service: parked ideas lifecycle."""
 
+from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from wyldfire.core.project import Project
 from wyldfire.core.events import create_event
+from wyldfire.core.text_utils import resolve_text_or_file
 from wyldfire.core.exceptions import WyldError
 from wyldfire.core.constants import (
     EMBER_BANKED,
@@ -16,7 +18,9 @@ from wyldfire.core.constants import (
 def bank_ember(
     project: Project,
     title: str,
-    note: str = "",
+    note: Optional[str] = None,
+    desc: Optional[str] = None,
+    desc_file: Optional[Path] = None,
     kind: str = "content",
 ) -> Dict[str, Any]:
     title = title.strip()
@@ -27,9 +31,12 @@ def bank_ember(
     if kind not in EMBER_KINDS:
         raise WyldError(f"invalid ember kind '{kind}'", "kind must be 'content' or 'mechanic'")
 
+    inline = desc if desc is not None else note
+    final_note = resolve_text_or_file(inline, desc_file, "desc", required=False, default="")
+
     event = create_event(
         "ember.banked",
-        {"title": title, "note": note, "kind": kind},
+        {"title": title, "note": final_note, "kind": kind},
     )
     project.store.append_event(event)
 
@@ -40,7 +47,7 @@ def bank_ember(
     return {
         "id": em_id,
         "title": title,
-        "note": note,
+        "note": final_note,
         "kind": kind,
         "state": EMBER_BANKED,
     }

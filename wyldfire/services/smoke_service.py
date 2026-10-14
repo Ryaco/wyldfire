@@ -7,6 +7,7 @@ import sqlite3
 from wyldfire.core.project import Project
 from wyldfire.core.config import load_registry
 from wyldfire.core.events import create_event
+from wyldfire.core.text_utils import resolve_text_or_file
 from wyldfire.core.exceptions import WyldError
 from wyldfire.core.constants import (
     SMOKE_STAGED,
@@ -39,6 +40,8 @@ def log_smoke(
     on: str,
     severity: int = 2,
     tags: str = "",
+    notes: Optional[str] = None,
+    notes_file: Optional[Path] = None,
 ) -> Dict[str, Any]:
     title = title.strip()
     if not title:
@@ -50,6 +53,9 @@ def log_smoke(
     ctx_kind, ctx_ref = parse_context(on)
     clean_tags = ",".join(t.strip() for t in tags.split(",") if t.strip())
 
+    final_notes = resolve_text_or_file(notes, notes_file, "notes", required=False, default="")
+    transition_note = final_notes if final_notes else title
+
     event = create_event(
         "smoke.opened",
         {
@@ -58,7 +64,8 @@ def log_smoke(
             "context_ref": ctx_ref,
             "severity": severity,
             "tags": clean_tags,
-            "note": title,
+            "note": transition_note,
+            "notes": final_notes,
         },
     )
     project.store.append_event(event)
@@ -75,6 +82,7 @@ def log_smoke(
         "severity": severity,
         "status": SMOKE_OPEN,
         "tags": clean_tags,
+        "notes": final_notes,
     }
 
 
@@ -84,6 +92,8 @@ def stage_smoke(
     on: str,
     severity: int = 2,
     tags: str = "",
+    notes: Optional[str] = None,
+    notes_file: Optional[Path] = None,
 ) -> Dict[str, Any]:
     title = title.strip()
     if not title:
@@ -100,6 +110,7 @@ def stage_smoke(
         )
 
     clean_tags = ",".join(t.strip() for t in tags.split(",") if t.strip())
+    final_notes = resolve_text_or_file(notes, notes_file, "notes", required=False, default="")
 
     event = create_event(
         "smoke.staged",
@@ -109,6 +120,7 @@ def stage_smoke(
             "context_ref": ctx_ref,
             "severity": severity,
             "tags": clean_tags,
+            "notes": final_notes,
         },
     )
     project.store.append_event(event)
@@ -141,10 +153,13 @@ def unstage_smoke(project: Project, smoke_id: int) -> Dict[str, Any]:
     return smoke_dict
 
 
-def identify_smoke(project: Project, smoke_id: int, note: str) -> Dict[str, Any]:
-    note = note.strip()
-    if not note:
-        raise WyldError("a note is required to identify smoke (diagnosis)", "provide a note explaining the diagnosis")
+def identify_smoke(
+    project: Project,
+    smoke_id: int,
+    note: Optional[str] = None,
+    notes_file: Optional[Path] = None,
+) -> Dict[str, Any]:
+    final_notes = resolve_text_or_file(note, notes_file, "notes", required=True)
 
     with project.get_connection() as conn:
         row = conn.execute("SELECT * FROM smoke WHERE id = ?", (smoke_id,)).fetchone()
@@ -156,24 +171,27 @@ def identify_smoke(project: Project, smoke_id: int, note: str) -> Dict[str, Any]
                 "commit it via a stoke first, or use 'wyld smoke log'"
             )
 
-    event = create_event("smoke.identified", {"id": smoke_id, "note": note})
+    event = create_event("smoke.identified", {"id": smoke_id, "note": final_notes})
     project.store.append_event(event)
-    return {"id": smoke_id, "status": SMOKE_IDENTIFIED, "note": note}
+    return {"id": smoke_id, "status": SMOKE_IDENTIFIED, "note": final_notes}
 
 
-def clear_smoke(project: Project, smoke_id: int, note: str) -> Dict[str, Any]:
-    note = note.strip()
-    if not note:
-        raise WyldError("a note is required to clear smoke (fix resolution)", "provide a note explaining the fix")
+def clear_smoke(
+    project: Project,
+    smoke_id: int,
+    note: Optional[str] = None,
+    notes_file: Optional[Path] = None,
+) -> Dict[str, Any]:
+    final_notes = resolve_text_or_file(note, notes_file, "notes", required=True)
 
     with project.get_connection() as conn:
         row = conn.execute("SELECT * FROM smoke WHERE id = ?", (smoke_id,)).fetchone()
         if not row:
             raise WyldError(f"smoke #{smoke_id} not found", "check 'wyld smoke list'")
 
-    event = create_event("smoke.cleared", {"id": smoke_id, "note": note})
+    event = create_event("smoke.cleared", {"id": smoke_id, "note": final_notes})
     project.store.append_event(event)
-    return {"id": smoke_id, "status": SMOKE_CLEARED, "note": note}
+    return {"id": smoke_id, "status": SMOKE_CLEARED, "note": final_notes}
 
 
 def tag_smoke(project: Project, smoke_id: int, tags: str) -> Dict[str, Any]:

@@ -5,7 +5,8 @@ from typing import Any, Dict, List, Optional
 import json
 
 from wyldfire.core.project import Project
-from wyldfire.core.events import create_event
+from wyldfire.core.events import create_event, check_agent_guardrail
+from wyldfire.core.text_utils import resolve_text_or_file
 from wyldfire.core.exceptions import WyldError
 from wyldfire.core.constants import (
     FLAME_SPARKED,
@@ -17,19 +18,26 @@ from wyldfire.core.constants import (
 )
 
 
-def spark_flame(project: Project, name: str, desc: str = "") -> Dict[str, Any]:
+def spark_flame(
+    project: Project,
+    name: str,
+    desc: Optional[str] = None,
+    desc_file: Optional[Path] = None,
+) -> Dict[str, Any]:
     name = name.strip()
     if not name:
         raise WyldError("flame name cannot be empty", "provide a flame name, e.g. wyld flame spark 'wildfire'")
+
+    final_desc = resolve_text_or_file(desc, desc_file, "desc", required=False, default="")
 
     with project.get_connection() as conn:
         existing = conn.execute("SELECT id FROM flames WHERE name = ?", (name,)).fetchone()
         if existing:
             raise WyldError(f"flame '{name}' already exists", "use another name or 'wyld flame show <name>'")
 
-    event = create_event("flame.sparked", {"name": name, "description": desc})
+    event = create_event("flame.sparked", {"name": name, "description": final_desc})
     project.store.append_event(event)
-    return {"name": name, "description": desc, "state": FLAME_SPARKED, "version": 1}
+    return {"name": name, "description": final_desc, "state": FLAME_SPARKED, "version": 1}
 
 
 def list_flames(project: Project) -> List[Dict[str, Any]]:
@@ -100,20 +108,23 @@ def get_flame(project: Project, name: str) -> Dict[str, Any]:
         return flame
 
 
-def version_flame(project: Project, name: str, notes: str) -> Dict[str, Any]:
-    notes = notes.strip()
-    if not notes:
-        raise WyldError("notes are required for a new flame version", "provide notes via --notes '...'")
+def version_flame(
+    project: Project,
+    name: str,
+    notes: Optional[str] = None,
+    notes_file: Optional[Path] = None,
+) -> Dict[str, Any]:
+    final_notes = resolve_text_or_file(notes, notes_file, "notes", required=True)
 
     flame = get_flame(project, name)
     current_versions = flame["versions"]
     next_n = len(current_versions) + 1
 
-    event = create_event("flame.versioned", {"name": name, "notes": notes})
+    event = create_event("flame.versioned", {"name": name, "notes": final_notes})
     project.store.append_event(event)
 
     new_state = FLAME_BURNING if next_n >= 2 and flame["state"] == FLAME_SPARKED else flame["state"]
-    return {"name": name, "version": next_n, "notes": notes, "state": new_state}
+    return {"name": name, "version": next_n, "notes": final_notes, "state": new_state}
 
 
 def stoke_flame(
@@ -127,13 +138,10 @@ def stoke_flame(
     flame = get_flame(project, name)
     metrics = metrics or {}
 
-    final_notes = ""
-    if notes_file:
-        if not notes_file.exists():
-            raise WyldError(f"notes file '{notes_file}' does not exist", "check file path")
-        final_notes = notes_file.read_text(encoding="utf-8").strip()
-    elif notes:
-        final_notes = notes.strip()
+    if metrics and tester in ("dev", "agent"):
+        check_agent_guardrail("scoring flame metrics")
+
+    final_notes = resolve_text_or_file(notes, notes_file, "notes", required=False, default="")
 
     # Find staged smoke for this flame
     with project.get_connection() as conn:
@@ -179,6 +187,7 @@ def stoke_flame(
 
 
 def crown_flame(project: Project, name: str, note: str) -> Dict[str, Any]:
+    check_agent_guardrail("crowning a flame")
     note = note.strip()
     if not note:
         raise WyldError("note is required to crown a flame", "provide a note explaining why this flame was chosen")

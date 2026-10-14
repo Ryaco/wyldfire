@@ -22,11 +22,18 @@ from wyldfire.cli.wick import wick
 from wyldfire.cli.template import template
 from wyldfire.cli.tester import tester
 from wyldfire.cli.metric import metric
-from wyldfire.cli.sync import login_cmd, logout_cmd, link_cmd, sync_cmd, doctor_cmd
+from wyldfire.cli.sync import login_cmd, logout_cmd, link_cmd, sync_cmd, doctor_cmd, clone_cmd
 
 
 class WyldGroup(click.Group):
     """Click group that formats WyldError cleanly without Python tracebacks."""
+
+    def invoke(self, ctx):
+        try:
+            return super().invoke(ctx)
+        except WyldError as e:
+            print_error(str(e))
+            ctx.exit(e.exit_code)
 
     def __call__(self, *args, **kwargs):
         try:
@@ -64,6 +71,20 @@ def init_cmd(name: Optional[str], server: Optional[str]):
         target_dir.mkdir(parents=True, exist_ok=True)
     else:
         target_dir = cwd
+
+    if (target_dir / ".wyld").exists():
+        if server:
+            from wyldfire.core.project import Project
+            project = Project(target_dir)
+            project.config.set("server_url", server.rstrip("/"))
+            click.echo(f"Updated server URL for project '{project.name}' to {server.rstrip('/')}")
+            return
+        else:
+            raise WyldError(
+                f"project already initialized at {target_dir}",
+                "cd to the directory and run 'wyld status', or use 'wyld init --server <url>' to set server URL",
+            )
+
     project = init_project(target_dir, name=name, server_url=server)
     click.echo(f"Initialized Wyldfire project '{project.name}' in {target_dir}")
 
@@ -138,6 +159,7 @@ cli.add_command(metric)
 # Register sync commands
 cli.add_command(login_cmd)
 cli.add_command(logout_cmd)
+cli.add_command(clone_cmd)
 cli.add_command(link_cmd)
 cli.add_command(sync_cmd)
 cli.add_command(doctor_cmd)

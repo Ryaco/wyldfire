@@ -1,5 +1,6 @@
 """CLI commands for smoke (issues & learning database)."""
 
+from pathlib import Path
 from typing import Optional
 import click
 
@@ -10,7 +11,7 @@ from wyldfire.services import smoke_service
 
 @click.group()
 def smoke():
-    """Issues: decoupled bug and question tracking."""
+    """Issues: decoupled bug and tracking database."""
     pass
 
 
@@ -19,10 +20,12 @@ def smoke():
 @click.option("--on", required=True, help="Context: flame/<n>, fire/<n>, gate, or production")
 @click.option("--severity", "-s", type=click.IntRange(1, 3), default=2, help="Severity 1 (nit), 2 (problem), 3 (critical)")
 @click.option("--tags", default="", help="Comma-separated tags")
-def log_cmd(title: str, on: str, severity: int, tags: str):
+@click.option("--notes", "--note", "notes", default=None, help="Detailed notes / symptoms")
+@click.option("--notes-file", type=click.Path(exists=True, path_type=Path), default=None, help="Read notes from file")
+def log_cmd(title: str, on: str, severity: int, tags: str, notes: Optional[str], notes_file: Optional[Path]):
     """Log an open issue directly."""
     project = get_current_project()
-    res = smoke_service.log_smoke(project, title, on=on, severity=severity, tags=tags)
+    res = smoke_service.log_smoke(project, title, on=on, severity=severity, tags=tags, notes=notes, notes_file=notes_file)
     click.echo(f"→ smoke #{res['id']} open (severity {res['severity']}) on {res['context']}")
 
 
@@ -31,10 +34,12 @@ def log_cmd(title: str, on: str, severity: int, tags: str):
 @click.option("--on", required=True, help="Context: flame/<n> or fire/<n>")
 @click.option("--severity", "-s", type=click.IntRange(1, 3), default=2, help="Severity 1 (nit), 2 (problem), 3 (critical)")
 @click.option("--tags", default="", help="Comma-separated tags")
-def stage_cmd(title: str, on: str, severity: int, tags: str):
+@click.option("--notes", "--note", "notes", default=None, help="Detailed notes / symptoms")
+@click.option("--notes-file", type=click.Path(exists=True, path_type=Path), default=None, help="Read notes from file")
+def stage_cmd(title: str, on: str, severity: int, tags: str, notes: Optional[str], notes_file: Optional[Path]):
     """Stage an issue found during a playtest (committed by next stoke)."""
     project = get_current_project()
-    res = smoke_service.stage_smoke(project, title, on=on, severity=severity, tags=tags)
+    res = smoke_service.stage_smoke(project, title, on=on, severity=severity, tags=tags, notes=notes, notes_file=notes_file)
     click.echo(f"→ smoke #{res['id']} staged (pre-open) on {res['context']}")
 
 
@@ -72,21 +77,23 @@ def unstage_cmd(smoke_id: int):
 
 @smoke.command("identify")
 @click.argument("smoke_id", type=int)
-@click.option("--note", required=True, help="Diagnosis note")
-def identify_cmd(smoke_id: int, note: str):
+@click.option("--notes", "--note", "notes", default=None, help="Diagnosis note")
+@click.option("--notes-file", type=click.Path(exists=True, path_type=Path), default=None, help="Read diagnosis note from file")
+def identify_cmd(smoke_id: int, notes: Optional[str], notes_file: Optional[Path]):
     """Diagnose smoke (status: identified)."""
     project = get_current_project()
-    res = smoke_service.identify_smoke(project, smoke_id, note)
+    res = smoke_service.identify_smoke(project, smoke_id, note=notes, notes_file=notes_file)
     click.echo(f"→ smoke #{res['id']} identified")
 
 
 @smoke.command("clear")
 @click.argument("smoke_id", type=int)
-@click.option("--note", required=True, help="Fix / resolution note")
-def clear_cmd(smoke_id: int, note: str):
+@click.option("--notes", "--note", "notes", default=None, help="Fix / resolution note")
+@click.option("--notes-file", type=click.Path(exists=True, path_type=Path), default=None, help="Read fix note from file")
+def clear_cmd(smoke_id: int, notes: Optional[str], notes_file: Optional[Path]):
     """Clear smoke with fix resolution (status: cleared)."""
     project = get_current_project()
-    res = smoke_service.clear_smoke(project, smoke_id, note)
+    res = smoke_service.clear_smoke(project, smoke_id, note=notes, notes_file=notes_file)
     click.echo(f"→ smoke #{res['id']} cleared")
 
 

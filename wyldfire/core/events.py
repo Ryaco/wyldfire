@@ -25,6 +25,16 @@ def get_current_actor() -> str:
         return "dev"
 
 
+def check_agent_guardrail(action_description: str) -> None:
+    """Refuse judgment actions when WYLD_AGENT=1 is set."""
+    if os.environ.get("WYLD_AGENT") == "1":
+        from wyldfire.core.exceptions import WyldError
+        raise WyldError(
+            f"agent execution refused: {action_description} requires human judgment",
+            "WYLD_AGENT=1 is set; bookkeeping agents may transcribe but never judge",
+        )
+
+
 @dataclass
 class Event:
     id: str

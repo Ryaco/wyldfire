@@ -18,11 +18,12 @@ def flame():
 
 @flame.command("spark")
 @click.argument("name")
-@click.option("--desc", default="", help="Description of the prototype mechanic")
-def spark(name: str, desc: str):
+@click.option("--desc", default=None, help="Description of the prototype mechanic")
+@click.option("--desc-file", type=click.Path(exists=True, path_type=Path), default=None, help="Read description from file")
+def spark(name: str, desc: Optional[str], desc_file: Optional[Path]):
     """Create a new flame."""
     project = get_current_project()
-    res = flame_service.spark_flame(project, name, desc)
+    res = flame_service.spark_flame(project, name, desc=desc, desc_file=desc_file)
     click.echo(f"→ flame '{res['name']}' sparked (v1)")
 
 
@@ -90,11 +91,12 @@ def show_cmd(name: str, as_json: bool):
 
 @flame.command("version")
 @click.argument("name")
-@click.option("--notes", required=True, help="What changed in this iteration")
-def version_cmd(name: str, notes: str):
+@click.option("--notes", default=None, help="What changed in this iteration")
+@click.option("--notes-file", type=click.Path(exists=True, path_type=Path), default=None, help="Read notes from file")
+def version_cmd(name: str, notes: Optional[str], notes_file: Optional[Path]):
     """Record a new iteration of a flame."""
     project = get_current_project()
-    res = flame_service.version_flame(project, name, notes)
+    res = flame_service.version_flame(project, name, notes=notes, notes_file=notes_file)
     click.echo(f"→ flame '{res['name']}' is now v{res['version']} ({res['state']})")
 
 

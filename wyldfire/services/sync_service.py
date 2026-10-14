@@ -31,12 +31,24 @@ def logout_server(server_url: Optional[str] = None) -> None:
 
 
 def link_project(project: Project, server_url: Optional[str] = None) -> Dict[str, Any]:
+    creds = load_credentials()
     target_server = server_url or project.config.get("server_url")
     if not target_server:
-        raise WyldError("no server URL provided", "run 'wyld link --server <url>' or configure server_url")
+        if len(creds) == 1:
+            target_server = next(iter(creds.keys()))
+        elif len(creds) > 1:
+            known = ", ".join(creds.keys())
+            raise WyldError(
+                "no server URL provided and multiple servers configured in credentials",
+                f"did you mean --server <url>? Configured servers: {known}",
+            )
+        else:
+            raise WyldError(
+                "no server URL provided and no credentials found",
+                "run 'wyld login --server <url>' first, or specify 'wyld link --server <url>'",
+            )
     target_server = target_server.rstrip("/")
 
-    creds = load_credentials()
     token = creds.get(target_server)
     if not token:
         raise WyldError(
@@ -58,6 +70,9 @@ def link_project(project: Project, server_url: Optional[str] = None) -> Dict[str
         with urllib.request.urlopen(req, timeout=10.0) as resp:
             data = json.loads(resp.read().decode("utf-8"))
             project.config.set("server_url", target_server)
+            server_proj = data.get("project", {})
+            if server_proj.get("name"):
+                project.config.set("name", server_proj["name"])
             return {
                 "server_url": target_server,
                 "project_name": project.name,
@@ -67,6 +82,97 @@ def link_project(project: Project, server_url: Optional[str] = None) -> Dict[str
             }
     except Exception as e:
         raise WyldError(f"failed to link with server at {target_server}: {e}", "check network and token")
+
+
+def clone_project(
+    target_dir: Path,
+    project_id: str,
+    server_url: Optional[str] = None,
+) -> Dict[str, Any]:
+    target_dir = target_dir.resolve()
+    wyld_dir = target_dir / ".wyld"
+    if wyld_dir.exists():
+        raise WyldError(
+            f"project already initialized at {target_dir}",
+            "choose a different directory or remove existing .wyld/ to re-clone",
+        )
+
+    creds = load_credentials()
+    target_server = server_url
+    if not target_server:
+        if len(creds) == 1:
+            target_server = next(iter(creds.keys()))
+        elif len(creds) > 1:
+            known = ", ".join(creds.keys())
+            raise WyldError(
+                "no server URL provided and multiple servers configured in credentials",
+                f"specify one with 'wyld clone --server <url>' (configured: {known})",
+            )
+        else:
+            raise WyldError(
+                "no server URL provided and no credentials found",
+                "run 'wyld login --server <url>' first, or specify '--server <url>'",
+            )
+    target_server = target_server.rstrip("/")
+
+    token = creds.get(target_server)
+    if not token:
+        raise WyldError(
+            f"not logged in to {target_server}",
+            f"run 'wyld login --server {target_server}' first",
+        )
+
+    # Create directories
+    target_dir.mkdir(parents=True, exist_ok=True)
+    events_dir = wyld_dir / "events"
+    snapshots_dir = wyld_dir / "snapshots"
+    migrations_dir = wyld_dir / "migrations"
+
+    events_dir.mkdir(parents=True, exist_ok=True)
+    snapshots_dir.mkdir(parents=True, exist_ok=True)
+    migrations_dir.mkdir(parents=True, exist_ok=True)
+
+    # Initialize config
+    from wyldfire.core.config import ProjectConfig, register_project
+    config = ProjectConfig(wyld_dir)
+    config.set("project_id", project_id)
+    config.set("server_url", target_server)
+    config.set("mode", "offline-first")
+    config.set("name", target_dir.name)
+
+    # Gitignore .wyld/
+    gitignore_path = target_dir / ".gitignore"
+    entry = "\n# Wyldfire process & decision layer\n.wyld/\n"
+    if gitignore_path.exists():
+        content = gitignore_path.read_text(encoding="utf-8")
+        if ".wyld/" not in content and ".wyld" not in content:
+            gitignore_path.write_text(content.rstrip() + entry, encoding="utf-8")
+    else:
+        gitignore_path.write_text(entry.lstrip(), encoding="utf-8")
+
+    project = Project(target_dir)
+
+    # Link with server to confirm pairing and fetch project metadata
+    link_res = link_project(project, server_url=target_server)
+
+    # Pull history from server
+    sync_res = sync_project(project)
+
+    # Replay all pulled events to build projection
+    project.store.replay_all()
+
+    # Register in global registry
+    register_project(target_dir, project.name)
+
+    return {
+        "project": project,
+        "project_id": project_id,
+        "project_name": project.name,
+        "server_url": target_server,
+        "target_dir": target_dir,
+        "link": link_res,
+        "sync": sync_res,
+    }
 
 
 def sync_project(project: Project) -> Dict[str, Any]:

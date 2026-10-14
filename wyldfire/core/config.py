@@ -1,5 +1,6 @@
 """Project and global configuration management."""
 
+import os
 from pathlib import Path
 import json
 import tomllib
@@ -17,6 +18,10 @@ def get_credentials_path() -> Path:
     """Return path to credentials file in ~/.config/wyldfire/credentials."""
     d = Path.home() / ".config" / "wyldfire"
     d.mkdir(parents=True, exist_ok=True)
+    try:
+        os.chmod(d, 0o700)
+    except OSError:
+        pass
     return d / "credentials"
 
 
@@ -39,12 +44,20 @@ def load_credentials() -> dict[str, str]:
 
 
 def save_credential(server_url: str, token: str) -> None:
-    """Store token for server_url in ~/.config/wyldfire/credentials."""
+    """Store token for server_url in ~/.config/wyldfire/credentials with 0600 permissions."""
     creds = load_credentials()
     creds[server_url.rstrip("/")] = token
     path = get_credentials_path()
     path.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        os.chmod(path.parent, 0o700)
+    except OSError:
+        pass
     path.write_text(json.dumps(creds, indent=2), encoding="utf-8")
+    try:
+        os.chmod(path, 0o600)
+    except OSError:
+        pass
 
 
 def remove_credential(server_url: str | None = None) -> None:
@@ -53,12 +66,24 @@ def remove_credential(server_url: str | None = None) -> None:
     if not path.exists():
         return
     path.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        os.chmod(path.parent, 0o700)
+    except OSError:
+        pass
     if server_url is None:
         path.write_text("{}", encoding="utf-8")
+        try:
+            os.chmod(path, 0o600)
+        except OSError:
+            pass
         return
     creds = load_credentials()
     creds.pop(server_url.rstrip("/"), None)
     path.write_text(json.dumps(creds, indent=2), encoding="utf-8")
+    try:
+        os.chmod(path, 0o600)
+    except OSError:
+        pass
 
 
 def get_registry_path() -> Path:
@@ -117,6 +142,7 @@ class ProjectConfig:
         self.config_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
     def get(self, key: str, default: Any = None) -> Any:
+        self.load()
         return self._data.get(key, default)
 
     def set(self, key: str, value: Any) -> None:

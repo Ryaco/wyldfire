@@ -27,6 +27,19 @@ def logout_cmd(server: Optional[str]):
     click.echo(f"→ logged out{' from ' + server if server else ''}")
 
 
+@click.command("clone")
+@click.option("--server", default=None, help="Remote sync server URL")
+@click.option("--project", "project_id", required=True, help="Remote project ID (UUID)")
+@click.argument("directory", required=False, default=None, type=click.Path())
+def clone_cmd(server: Optional[str], project_id: str, directory: Optional[str]):
+    """Clone an existing remote project by ID onto this machine."""
+    from pathlib import Path
+    target_dir = Path(directory).resolve() if directory else Path.cwd().resolve()
+    res = sync_service.clone_project(target_dir, project_id=project_id, server_url=server)
+    click.echo(f"→ cloned project '{res['project_name']}' ({res['project_id']}) into {res['target_dir']}")
+    click.echo(f"  pulled {res['sync']['pulled_events']} events from {res['server_url']}")
+
+
 @click.command("link")
 @click.option("--server", default=None, help="Server URL")
 def link_cmd(server: Optional[str]):

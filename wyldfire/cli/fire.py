@@ -18,12 +18,13 @@ def fire():
 @fire.command("start")
 @click.argument("name")
 @click.option("--flames", required=True, help="Comma-separated member flames")
-@click.option("--desc", default="", help="Fire description")
-def start_cmd(name: str, flames: str, desc: str):
+@click.option("--desc", default=None, help="Fire description")
+@click.option("--desc-file", type=click.Path(exists=True, path_type=Path), default=None, help="Read description from file")
+def start_cmd(name: str, flames: str, desc: Optional[str], desc_file: Optional[Path]):
     """Start a new fire from member flames."""
     project = get_current_project()
     flame_list = [f.strip() for f in flames.split(",") if f.strip()]
-    res = fire_service.start_fire(project, name, flames=flame_list, desc=desc)
+    res = fire_service.start_fire(project, name, flames=flame_list, desc=desc, desc_file=desc_file)
     click.echo(f"→ fire '{res['name']}' started in phase {res['phase']}")
 
 

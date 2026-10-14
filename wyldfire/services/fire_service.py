@@ -5,7 +5,8 @@ from typing import Any, Dict, List, Optional
 import json
 
 from wyldfire.core.project import Project
-from wyldfire.core.events import create_event
+from wyldfire.core.events import create_event, check_agent_guardrail
+from wyldfire.core.text_utils import resolve_text_or_file
 from wyldfire.core.exceptions import WyldError, FireNotSelectedError
 from wyldfire.core.constants import (
     PHASE_PROTOTYPE,
@@ -32,11 +33,14 @@ def start_fire(
     project: Project,
     name: str,
     flames: List[str],
-    desc: str = "",
+    desc: Optional[str] = None,
+    desc_file: Optional[Path] = None,
 ) -> Dict[str, Any]:
     name = name.strip()
     if not name:
         raise WyldError("fire name cannot be empty", "provide a fire name, e.g. wyld fire start 'my-game'")
+
+    final_desc = resolve_text_or_file(desc, desc_file, "desc", required=False, default="")
 
     with project.get_connection() as conn:
         existing = conn.execute("SELECT id FROM fires WHERE name = ?", (name,)).fetchone()
@@ -56,7 +60,7 @@ def start_fire(
 
     event = create_event(
         "fire.started",
-        {"name": name, "flames": clean_flames, "description": desc},
+        {"name": name, "flames": clean_flames, "description": final_desc},
     )
     project.store.append_event(event)
 
@@ -66,7 +70,7 @@ def start_fire(
 
     return {
         "name": name,
-        "description": desc,
+        "description": final_desc,
         "phase": PHASE_PROTOTYPE,
         "flames": clean_flames,
     }
@@ -236,13 +240,10 @@ def stoke_fire(
     fire = get_fire(project, name)
     metrics = metrics or {}
 
-    final_notes = ""
-    if notes_file:
-        if not notes_file.exists():
-            raise WyldError(f"notes file '{notes_file}' does not exist", "check file path")
-        final_notes = notes_file.read_text(encoding="utf-8").strip()
-    elif notes:
-        final_notes = notes.strip()
+    if metrics and tester in ("dev", "agent"):
+        check_agent_guardrail("scoring fire metrics")
+
+    final_notes = resolve_text_or_file(notes, notes_file, "notes", required=False, default="")
 
     # Find staged smoke for this fire
     with project.get_connection() as conn:

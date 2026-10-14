@@ -4,7 +4,7 @@ from typing import Any, Dict, List, Optional, Tuple
 import json
 
 from wyldfire.core.project import Project
-from wyldfire.core.events import create_event
+from wyldfire.core.events import create_event, check_agent_guardrail
 from wyldfire.core.exceptions import WyldError
 from wyldfire.core.constants import (
     PHASE_PROTOTYPE,
@@ -335,6 +335,7 @@ def config_gate(
 
 
 def attest_scope(project: Project, note: str, fire_name: Optional[str] = None) -> Dict[str, Any]:
+    check_agent_guardrail("attesting gate scope")
     note = note.strip()
     if not note:
         raise WyldError("note is required for scope attestation", "provide a note attesting that scope is complete")
@@ -346,6 +347,7 @@ def attest_scope(project: Project, note: str, fire_name: Optional[str] = None) -
 
 
 def exclude_stoke(project: Project, stoke_id: int, reason: str, fire_name: Optional[str] = None) -> Dict[str, Any]:
+    check_agent_guardrail("excluding stoke evidence")
     reason = reason.strip()
     if not reason:
         raise WyldError("reason is required to exclude a stoke", "provide a reason for dropping the stoke's evidence")
@@ -362,6 +364,7 @@ def exclude_stoke(project: Project, stoke_id: int, reason: str, fire_name: Optio
 
 
 def waive_check(project: Project, check_name: str, reason: str, fire_name: Optional[str] = None) -> Dict[str, Any]:
+    check_agent_guardrail("waiving a gate check")
     reason = reason.strip()
     if not reason:
         raise WyldError("reason is required to waive a gate check", "provide a reason for the waiver")
@@ -392,6 +395,7 @@ def set_slice_bundles(project: Project, bundles: List[str], fire_name: Optional[
 
 
 def finish_slice(project: Project, note: str, fire_name: Optional[str] = None) -> Dict[str, Any]:
+    check_agent_guardrail("attesting vertical slice completion")
     note = note.strip()
     if not note:
         raise WyldError("note is required for slice-done attestation", "provide a pitch-ready attestation note")
@@ -447,6 +451,7 @@ def finish_slice(project: Project, note: str, fire_name: Optional[str] = None) -
 
 
 def finish_plan(project: Project, note: str, fire_name: Optional[str] = None) -> Dict[str, Any]:
+    check_agent_guardrail("attesting content plan completion")
     note = note.strip()
     if not note:
         raise WyldError("note is required for plan-done attestation", "provide an attestation that the plan covers iteration 1")

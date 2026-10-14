@@ -1,5 +1,6 @@
 """CLI commands for embers (parked ideas)."""
 
+from pathlib import Path
 from typing import Optional
 import click
 
@@ -16,12 +17,13 @@ def ember():
 
 @ember.command("bank")
 @click.argument("title")
-@click.option("--note", default="", help="Context note on why/where this struck")
+@click.option("--desc", "--note", "desc", default=None, help="Context note / description on why/where this struck")
+@click.option("--desc-file", type=click.Path(exists=True, path_type=Path), default=None, help="Read description from file")
 @click.option("--kind", default="content", help="Kind: content or mechanic (defaults to content)")
-def bank_cmd(title: str, note: str, kind: str):
+def bank_cmd(title: str, desc: Optional[str], desc_file: Optional[Path], kind: str):
     """Bank an idea to prevent scope creep."""
     project = get_current_project()
-    res = ember_service.bank_ember(project, title, note=note, kind=kind)
+    res = ember_service.bank_ember(project, title, desc=desc, desc_file=desc_file, kind=kind)
     click.echo(f"→ ember #{res['id']} banked ({res['kind']})")
 
 
