@@ -673,9 +673,18 @@ can originate events.
 ### Server (v1)
 
 - **Stack:** FastAPI + SQLite, single-tenant personal use (Postgres later if
-  ever needed). One small always-on VM (e.g. Oracle Always Free) is plenty —
-  note for deployment: sleeping free tiers (Render free) wake too slowly for
-  a CLI client; prefer always-on.
+  ever needed).
+- **Deployment:** containerized. A multi-arch (amd64/arm64) `Dockerfile`
+  (python:3.11-slim, installs `wyldfire[server]`, serves via uvicorn on
+  `$PORT`) plus a `docker-compose.yml` defining the `wyld-server` service.
+  Run `docker compose up -d` on any always-on host — one small VM (e.g.
+  Oracle Always Free) or a Raspberry Pi is plenty. Note: sleeping free tiers
+  (Render free) wake too slowly for a CLI client; prefer always-on.
+  - Server state (SQLite) lives in the `/data` volume — back it up; it
+    holds the merge point's copy of every event.
+  - The API token is supplied via the `WYLD_SERVER_TOKEN` env var at
+    deploy time, never baked into the image.
+  - Health check: `GET /health`.
 - **Auth:** single API token generated at server setup. `wyld login --server
   <url>` prompts for it once and stores it in
   `~/.config/wyldfire/credentials` — never in the project directory.
