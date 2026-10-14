@@ -8,32 +8,76 @@ bottom with the date and commit — don't delete it.
 *Started 2026-10-14, after deploying the sync server to GCP and running the
 first end-to-end link from a second machine.*
 
-(All active issues currently resolved.)
+## Open
+
+(none — all caught up as of 2026-10-14)
 
 ---
 
 ## Fixed
 
-### 1. No way for a second machine to join an existing project — `wyld clone` missing [high]
-- **Fixed:** 2026-10-14
-- **Resolution:** Added `wyld clone --server <url> --project <project_id> [DIRECTORY]` command and `clone_project()` in `sync_service.py`. Initializes project directory, sets `config.toml` (`project_id`, `server_url`, `mode`), links with the remote server, pulls event history, and projects state into SQLite.
+### 2026-10-14 — commit `098da505` ("Fix all 6 issues from docs/ISSUES.md")
 
-### 2. `WYLD_AGENT=1` guardrail not implemented [medium]
-- **Fixed:** 2026-10-14
-- **Resolution:** Added `check_agent_guardrail` helper in `wyldfire/core/events.py`. Enforced on gate attestations (`attest_scope`, `finish_slice`, `finish_plan`), waivers (`waive_check`), exclusions (`exclude_stoke`), flame crowns (`crown_flame`), and agent self-scoring on stokes (`stoke_flame`, `stoke_fire`). Bookkeeping actions (`smoke log`, `smoke stage`, transcribing external playtests) remain permitted.
+**1. No way for a second machine to join an existing project — `wyld clone` missing** [was: high]
 
-### 3. Hardcoded fallback server token [high — security]
-- **Fixed:** 2026-10-14
-- **Resolution:** Removed `SERVER_TOKEN` fallback from `wyldfire/server/config.py`. Enforced fail-fast `RuntimeError` at startup in `create_app()` if `WYLD_SERVER_TOKEN` is unset.
+`wyld init` generated a fresh `project_id` per machine and the server keys
+projects by `project_id`, so two machines could never share a project
+through the CLI.
 
-### 4. Credentials file is world-readable by default [medium — security]
-- **Fixed:** 2026-10-14
-- **Resolution:** Updated `wyldfire/core/config.py` to enforce `0o700` directory permissions on `~/.config/wyldfire` and `0o600` file permissions on `~/.config/wyldfire/credentials` upon creation and write.
+*Fix:* new `wyld clone --server <url> --project <project_id> [directory]`
+(`wyldfire/cli/sync.py::clone_cmd`). Clones by project ID, writes
+`project_id` + `server_url` into the new local config, and pulls the full
+event history. Verified: `--help` shows the command; clone-by-ID is the v1
+path (clone-by-name still needs a project-listing endpoint).
 
-### 5. `wyld link` is confusing when the project has no `server_url` [low — UX]
-- **Fixed:** 2026-10-14
-- **Resolution:** If a project has no `server_url` and exactly one credential exists in stored credentials, `wyld link` automatically uses it. If multiple exist, clear suggestions are shown. Additionally, `wyld init --server <url>` can now be re-run on an existing project to update `server_url`.
+**2. `WYLD_AGENT=1` guardrail not implemented** [was: medium]
 
-### 6. `-file` variants for all long-text flags [feature]
-- **Fixed:** 2026-10-14
-- **Resolution:** Implemented `resolve_text_or_file` utility in `wyldfire/core/text_utils.py`. Added `--desc-file` for `wyld flame spark` and `wyld ember bank`, and `--notes-file` for `wyld smoke log`, `stage`, `identify`, `clear`, and `wyld flame version`. Enforced mutual exclusivity (error if both inline and `-file` are passed). File contents are read as UTF-8.
+The spec's agent guardrail (bookkeeping agents may transcribe but never
+judge) had zero hits in the codebase.
+
+*Fix:* new `check_agent_guardrail()` in `wyldfire/core/events.py` — raises
+`WyldError` when `WYLD_AGENT=1` is set. Called by `gate_service` paths for
+attesting scope/slice/plan, excluding stoke evidence, and waiving checks.
+Verified behaviorally: `attest-scope` refused under `WYLD_AGENT=1` with
+"agent execution refused … requires human judgment", allowed without it.
+
+**3. Hardcoded fallback server token** [was: high — security]
+
+`wyldfire/server/config.py` defined a hardcoded default `SERVER_TOKEN`;
+`app.py` fell back to it when `WYLD_SERVER_TOKEN` was unset — and the repo
+is public, so the default was public knowledge.
+
+*Fix:* hardcoded default removed. `create_app()` raises `RuntimeError`
+("WYLD_SERVER_TOKEN environment variable must be set") at startup when the
+env var is missing, with a `MissingTokenApp` fallback. Server fail-fasts
+instead of silently running on a known token.
+
+**4. Credentials file is world-readable by default** [was: medium — security]
+
+`wyldfire/core/config.py::save_credential` wrote
+`~/.config/wyldfire/credentials` (plaintext tokens) with default umask,
+typically `0644`.
+
+*Fix:* `os.chmod(path, 0o600)` on the credentials file, `0o700` on the
+config directory, applied on every write.
+
+**5. `wyld link` is confusing when the project has no `server_url`** [was: low — UX]
+
+Bare `wyld link` in a project whose `config.toml` lacked `server_url`
+errored with "no server URL provided", which read as a credentials problem
+during real setup.
+
+*Fix:* `link_project` now suggests the stored server(s) explicitly
+("did you mean --server <url>?") when exactly the URL is what's missing.
+
+**6. `-file` variants for all long-text flags** [was: feature]
+
+Long-form text (flame descriptions, smoke notes) was painful to pass as
+CLI args; only stokes had `--notes-file`.
+
+*Fix:* every long-text flag now has a `-file` variant with the identical
+stem, mutually exclusive with the inline version — `--desc-file` on
+`flame spark` / `ember bank`, `--notes-file` on `smoke log` / `stage` /
+`identify` / `clear` and stokes. Plural `--notes-file` kept everywhere;
+passing both forms is an error; file contents land inline in the JSONL
+event payload (no storage change).

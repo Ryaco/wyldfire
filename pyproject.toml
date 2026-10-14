@@ -4,7 +4,7 @@ build-backend = "flit_core.buildapi"
 
 [project]
 name = "wyldfire"
-version = "0.1.0"
+version = "0.1.1"
 description = "An opinionated finite-state-machine CLI for solo indie game developers"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -24,3 +24,4 @@ test = [
 
 [project.scripts]
 wyld = "wyldfire.cli.main:cli"
+
