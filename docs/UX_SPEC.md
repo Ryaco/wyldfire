@@ -87,6 +87,9 @@ sparked ──► burning ──► tested ──► stoked (chosen for the gate
 ```bash
 # Create a flame
 wyld flame spark "wildfire" --desc "Top-down wildfire containment: cut firebreaks while wind spreads the fire"
+# …or a full design doc from a file:
+wyld flame spark "wildfire" --desc-file design/wildfire.md
+# (--desc and --desc-file are mutually exclusive; same rule for --notes/--notes-file everywhere)
 
 # List / inspect flames
 wyld flame list
@@ -134,10 +137,14 @@ wyld flame stoke wildfire --tester Jo --notes-file session.md
 # use it for bugs found outside playtests.
 
 # Identify — status: identified. Note describes what the problem is.
-wyld smoke identify 3 --note "spread rate scales with map size, not player count"
+wyld smoke identify 3 --notes "spread rate scales with map size, not player count"
 
 # Clear — status: cleared. Note describes what the fix was.
-wyld smoke clear 3 --note "spread rate now scales with player count"
+wyld smoke clear 3 --notes "spread rate now scales with player count"
+
+# Every long-text flag takes a -file variant (--notes-file PATH on
+# log/stage/identify/clear; --desc-file on flame spark / ember bank).
+# Passing both forms is an error.
 
 # Tag at any point (open or later); tags emerge organically, no suggestions
 wyld smoke tag 3 --tags "balance,spread-rate"
@@ -197,6 +204,7 @@ need them. Same here — an ember is an idea you're not allowed to act on yet.
 # Bank an ember — park a production-sized idea during prototype
 wyld ember bank "neon-noir city theme for the level set" \
   --note "struck me mid-stoke: rain-slick streets would sell the fire contrast"
+# (--note is an alias of --desc; --desc-file PATH for longer write-ups)
 
 # List banked embers
 wyld ember list
@@ -443,12 +451,18 @@ Templates live at the project level so every fire's wick can reuse them
 ### `wyld sync` — offline-first hosted sync (v1)
 
 ```bash
-# Pair this machine with your server (token stored in ~/.config/wyldfire/,
-# never in the project)
+# Pair this machine with your server (token stored in ~/.config/wyldfire/
+# with 0600 permissions, never in the project)
 wyld login --server https://wyld.example.com
 # → token stored. Now link this project:
 wyld link
 # → paired with server project "wildfire-game" (created it)
+# (no server URL in the project config? with one stored credential it's used
+# automatically; with several, link suggests them)
+
+# New machine? Join the existing project by ID (find it in .wyld/config.toml
+# on the first machine) — pulls the full event history:
+wyld clone --server https://wyld.example.com --project e1089ab5-... wildfire-game
 
 # Normal use: work offline freely. When you're back online:
 wyld sync
@@ -588,7 +602,8 @@ no wyldfire data.
 
 v1 also includes hosted sync: wyld is offline-first (every mutation appends
 locally, the tool always works), and `wyld sync` pushes/pulls events against
-a personal FastAPI server (single API token, `wyld login`). The server is the
+a personal FastAPI server (single API token, `wyld login`; the server refuses
+to start without `WYLD_SERVER_TOKEN` set — no default token). The server is the
 merge point. Conflicts resolve by a fixed, deterministic policy — append-only
 data merges, state machines move forward only, scalar edits keep the newest,
 deletes are tombstones that never lose work, stale gate passes are rejected —
@@ -710,3 +725,22 @@ Stack: Python + Click (CLI), FastAPI (sync server).
   toys, and scope are reflection checks: the app can't answer them, so it
   surfaces the dev's stoke logs as evidence and requires an honest recorded
   answer — a mirror, not a judge.
+- **WYLD_AGENT=1 enforcement** (implemented 2026-10-14): `check_agent_guardrail()`
+  in `wyldfire/core/events.py` refuses gate attestations, stoke-evidence
+  exclusions, and check waivers when `WYLD_AGENT=1` is set. Bookkeeping agents
+  may transcribe (stokes, smoke symptoms) but never judge.
+- **Long-text `-file` flags** (decided + implemented 2026-10-14): every long-text
+  flag has a `-file` variant with the identical stem (`--desc`/`--desc-file`,
+  `--notes`/`--notes-file`); passing both is an error (enforced by
+  `resolve_text_or_file` in `wyldfire/core/text_utils.py`); file contents land
+  inline in the event payload, no storage change.
+- **`wyld clone`** (added 2026-10-14): new machines join an existing project by
+  ID — `wyld clone --server <url> --project <id> [directory]` writes the project
+  id + server URL locally and pulls the full history. (Clone-by-name needs a
+  project-list endpoint — future.)
+- **Server/token hardening** (2026-10-14): no default server token — the server
+  fail-fasts without `WYLD_SERVER_TOKEN`; client credentials file is `0600`
+  (config dir `0700`).
+- **`wyld link` UX** (2026-10-14): with no server URL configured, one stored
+  credential is used automatically; several are suggested explicitly
+  ("did you mean --server <url>?").

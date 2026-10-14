@@ -37,6 +37,11 @@ API endpoint (so keep I/O logic separate from Click wrappers).
    the making happens elsewhere.
 6. **Notes are evidence.** Smoke transitions, waivers, exclusions, and
    attestations all require a `--note`/`--reason`. Timestamps everywhere.
+   Every long-text flag has a `-file` variant with the identical stem
+   (`--desc`/`--desc-file`, `--notes`/`--notes-file`, resolved by
+   `wyldfire/core/text_utils.py::resolve_text_or_file`); passing both forms
+   is an error, file contents are read as UTF-8 and stored inline in the
+   event payload.
 
 ## 2. Terminology
 
@@ -93,8 +98,9 @@ API endpoint (so keep I/O logic separate from Click wrappers).
   backs up.
 - **`.wyld/` is gitignored wholesale.** The game repo carries no wyldfire
   data — wyld is the decision/process layer, git is the file layer, and they
-  stay separate. (`.wyld/config.toml` holds the server URL; a fresh clone
-  re-links with `wyld link`.)
+  stay separate. (`.wyld/config.toml` holds the server URL and project id; a
+  new machine joins an existing project with
+  `wyld clone --server <url> --project <id>`.)
 - **Writes go through the CLI only.** Agents, importers (e.g. Google Form
   ingestion), and any future GUI all call `wyld` commands. Validation,
   version-pinning, and event generation live in exactly one place.
@@ -105,8 +111,12 @@ API endpoint (so keep I/O logic separate from Click wrappers).
   snapshot DB next to the log so fresh rebuilds are fast. Snapshot + log
   tail = full state.
 - **Actor attribution.** `actor` is a first-class event field. Human actions
-  record the user; agent actions record the agent (driven by `WYLD_AGENT=1`,
-  per the agent-automation policy).
+  record the user; agent actions record the agent. When `WYLD_AGENT=1` is set,
+  the CLI *refuses* judgment commands — gate attestations, stoke-evidence
+  exclusions, check waivers — via `check_agent_guardrail()`
+  (`wyldfire/core/events.py`), called at the top of those service functions.
+  Bookkeeping agents may transcribe (stokes, smoke symptoms) but never judge;
+  the refusal error names the human-only rule.
 - **`.wyld/` layout:** `config.toml` (server URL, project id, mode),
   `events/`, `wyld.db` (gitignored), `snapshots/`, `migrations/`
   (projection migrations only).
@@ -356,16 +366,21 @@ wyld status [--json]        # dashboard: fires+phases, checked-out fire, wick po
 
 ### wyld sync — hosted sync (v1, offline-first)
 ```
-wyld login --server <url>   # prompt for API token, store in ~/.config/wyldfire/credentials (never in project)
+wyld login --server <url>   # prompt for API token, store in ~/.config/wyldfire/credentials (0600; never in project)
 wyld logout                 # forget the token for this server
-wyld link [--server <url>]  # pair this project with a server-side project (creates it if needed)
+wyld link [--server <url>]  # pair this project with a server-side project (creates it if needed);
+                            # with no URL and exactly one stored credential, uses it; with several,
+                            # suggests them ("did you mean --server <url>?")
+wyld clone --server <url> --project <id> [directory]
+                            # join an existing project on a new machine: writes the project id +
+                            # server URL into a fresh local config, then pulls the full event history
 wyld sync [--json]          # push local events, pull remote events, apply, print sync report
 wyld doctor [--json]        # orphans, rejected events, possible duplicates needing a human
 ```
 
 ### wyld flame — prototypes (global, no fire context)
 ```
-wyld flame spark <name> --desc "..."
+wyld flame spark <name> --desc "..." | --desc-file PATH
 wyld flame list [--json]                    # sorted by most recent stoke, desc [REC]
 wyld flame show <name> [--json]             # incl. versions, stokes, state
 wyld flame version <name> --notes "..."     # required notes; sparked→burning on 2nd version
@@ -394,15 +409,15 @@ wyld metric remove <name>                   # definition only; recorded stoke va
 
 ### wyld smoke — issues (global; anchored via --on)
 ```
-wyld smoke log <title> --on <ctx> --severity 1-3 [--tags "a,b"]
-                                            # ctx: flame/<n> | fire/<n> | gate | production ; → open, note=symptom
-wyld smoke stage <title> --on <ctx> --severity 1-3 [--tags "a,b"]
+wyld smoke log <title> --on <ctx> --severity 1-3 [--tags "a,b"] [--notes "..." | --notes-file PATH]
+                                            # ctx: flame/<n> | fire/<n> | gate | production ; → open, notes=symptom
+wyld smoke stage <title> --on <ctx> --severity 1-3 [--tags "a,b"] [--notes "..." | --notes-file PATH]
                                             # ctx: flame/<n> | fire/<n> only ; → staged (pre-open)
                                             # a stoke on that flame/fire commits staged smoke → open, linked to the stoke
 wyld smoke staged [--on <ctx>]              # list staged smoke
 wyld smoke unstage <id>                     # discard staged smoke (never opened; prints what was dropped)
-wyld smoke identify <id> --note "..."       # → identified, note=diagnosis (required)
-wyld smoke clear <id> --note "..."          # → cleared, note=fix (required)
+wyld smoke identify <id> --notes "..." | --notes-file PATH   # → identified, notes=diagnosis (required)
+wyld smoke clear <id> --notes "..." | --notes-file PATH      # → cleared, notes=fix (required)
 wyld smoke tag <id> --tags "a,b"
 wyld smoke list [--on <ctx>] [--status staged|open|identified|cleared] [--severity N] [--json]
 wyld smoke show <id> [--json]
@@ -412,7 +427,7 @@ wyld smoke search --tags "a,b" [--status cleared] [--all] [--json]
 
 ### wyld ember — parked ideas
 ```
-wyld ember bank <title> --note "..." [--kind content|mechanic]   # default content
+wyld ember bank <title> [--desc "..." | --desc-file PATH] [--kind content|mechanic]   # default kind content; --note is an alias of --desc
 wyld ember list [--kind ...] [--state ...] [--json]
 wyld ember show <id> [--json]
 wyld ember kindle <id> --note "..."         # content→ toward wick/scope (dev adds bundle/fuel, notes where);
@@ -569,6 +584,8 @@ templates welcome). `gate plan-done --note` requires:
 1. **Notes are evidence.** Required: smoke transitions, flame crown/douse,
    waivers, stoke exclusions, attestations, wick cut/scope-change, ember
    kindle/dismiss/set-kind, flame versions. Optional: wick finish, stoke notes.
+   Every long-text flag (`--desc`, `--notes`) has a `-file` variant with the
+   identical stem; passing both is an error.
 2. **No silent state changes.** Every mutation prints what changed and the new
    state (`→ smoke #3 identified`, `→ fire "full-game" is now in gate:part2`).
 3. **Never a bare "no".** Blocks always list structured, actionable reasons.
@@ -683,18 +700,21 @@ can originate events.
   - Server state (SQLite) lives in the `/data` volume — back it up; it
     holds the merge point's copy of every event.
   - The API token is supplied via the `WYLD_SERVER_TOKEN` env var at
-    deploy time, never baked into the image.
+    deploy time, never baked into the image. The server **refuses to start**
+    without it — there is no default token (fail-fast); a misconfigured
+    deploy crashes loudly instead of running on a publicly-known secret.
   - Health check: `GET /health`.
 - **Auth:** single API token generated at server setup. `wyld login --server
   <url>` prompts for it once and stores it in
-  `~/.config/wyldfire/credentials` — never in the project directory.
+  `~/.config/wyldfire/credentials` — never in the project directory. The
+  credentials file is written with `0600` permissions (config dir `0700`).
 - **API (v1 minimal):**
   - `POST /api/v1/events` — push a batch of events. Idempotent by UUID: the
     server appends unseen events, skips known ones, returns
     `{accepted, skipped}`.
   - `GET /api/v1/events?since=<ts>` — pull events newer than `since`.
   - `POST /api/v1/projects` — create-or-get the server-side project record
-    backing `wyld link`.
+    backing `wyld link` and `wyld clone`.
 - **UI state never syncs:** the checked-out fire, cursor positions, and other
   per-machine UI state stay local. Only domain events travel.
 
