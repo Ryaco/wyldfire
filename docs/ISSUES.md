@@ -82,6 +82,34 @@ problem.
 explicitly (`did you mean --server <url>?`) — or use it. Also consider
 letting `wyld init --server` be re-runnable to set the URL later.
 
+
+## 6. `-file` variants for all long-text flags [feature]
+
+**What:** Long-form text (flame descriptions, smoke notes, ember
+descriptions) is painful to pass as CLI args. Stokes already support
+`--notes "..." | --notes-file PATH` (like `git commit -F`); extend the same
+pattern everywhere a long text field exists.
+
+**Convention:** every long-text flag gets a `-file` variant with the
+*identical stem*, mutually exclusive with the inline version:
+
+- `wyld flame spark --desc ... | --desc-file PATH`
+- `wyld ember bank --desc ... | --desc-file PATH`
+- `wyld smoke log` / `stage` / `identify` / `clear` — `--notes ... | --notes-file PATH`
+- (stokes already have `--notes ... | --notes-file PATH`)
+
+Keep the plural `--notes-file` everywhere for consistency — do not
+introduce a singular `--note-file`.
+
+**Rules:** passing both the inline flag and its `-file` variant is an
+error, not "last wins". File contents are read as UTF-8 and stored inline
+in the JSONL event payload (no storage-layer change needed).
+
+**Why it matters:** some flames need full design documents, not one-line
+descriptions; same for detailed smoke symptoms/diagnoses. Agents and
+scripts (e.g. playtester-form ingestion) also need a non-interactive way
+to supply long text.
+
 ---
 
 ## Fixed
