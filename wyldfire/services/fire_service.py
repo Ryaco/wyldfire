@@ -207,6 +207,39 @@ def remove_flames_from_fire(project: Project, name: str, flames: List[str]) -> D
     return {"name": name, "removed_flames": clean_flames}
 
 
+def set_thesis(
+    project: Project,
+    fire_name: Optional[str] = None,
+    origin: Optional[str] = None,
+    statement: Optional[str] = None,
+    statement_file: Optional[Path] = None,
+) -> Dict[str, Any]:
+    resolved = resolve_fire_name(project, fire_name)
+    fire = get_fire(project, resolved)
+
+    clean_origin = (origin or "").strip()
+    clean_statement = resolve_text_or_file(statement, statement_file, "statement", required=False, default="").strip()
+
+    if not clean_origin and not clean_statement:
+        raise WyldError(
+            "at least one of --origin or --statement/--statement-file is required",
+            "provide the thesis origin and/or statement for this fire",
+        )
+
+    existing_origin = fire.get("thesis_origin") or ""
+    existing_statement = fire.get("thesis_statement") or ""
+
+    final_origin = clean_origin if clean_origin else existing_origin
+    final_statement = clean_statement if clean_statement else existing_statement
+
+    event = create_event(
+        "fire.thesis_set",
+        {"fire": resolved, "origin": final_origin, "statement": final_statement},
+    )
+    project.store.append_event(event)
+    return {"fire": resolved, "origin": final_origin, "statement": final_statement}
+
+
 def set_core_loop(project: Project, fire_name: str, loop: str) -> Dict[str, Any]:
     loop = loop.strip()
     if not loop:
@@ -258,6 +291,37 @@ def stoke_fire(
             "a stoke needs at least one of: notes, metric values, or staged smoke",
             "provide --notes '...', --metric name=val, or stage smoke first with 'wyld smoke stage'"
         )
+
+    # Drift check on member flames
+    from wyldfire.services.flame_service import get_flame
+    for fl in fire.get("flames", []):
+        fl_data = get_flame(project, fl["name"])
+        if fl_data.get("materials_path") and fl_data.get("versions"):
+            pinned = fl.get("pinned_version")
+            target_v = None
+            if pinned:
+                for v in fl_data["versions"]:
+                    if v["n"] == pinned:
+                        target_v = v
+                        break
+            else:
+                target_v = fl_data["versions"][-1]
+            if target_v and target_v.get("materials_hash"):
+                mat_path = Path(fl_data["materials_path"])
+                if not mat_path.is_absolute():
+                    mat_path = project.root_dir / mat_path
+                if mat_path.exists():
+                    patterns = json.loads(target_v.get("ignore_patterns_json") or "[]")
+                    from wyldfire.core.materials import spec_from_patterns, load_wyldignore, compute_materials_hash
+                    spec = spec_from_patterns(patterns) if patterns else load_wyldignore(project.root_dir)
+                    cur_hash = compute_materials_hash(mat_path, spec)
+                    if cur_hash != target_v["materials_hash"]:
+                        last_n = target_v["n"]
+                        raise WyldError(
+                            f"blocked: member flame '{fl['name']}' materials changed since v{last_n}.",
+                            f"Did you forget to record the new version for '{fl['name']}'?\n"
+                            f"  wyld flame version {fl['name']} --notes \"...\"",
+                        )
 
     event = create_event(
         "stoke.logged",

@@ -38,6 +38,37 @@ def evaluate_gate_checks(project: Project, fire_name: str) -> Dict[str, Any]:
 
         checks = []
 
+        # 0. Thesis declared
+        origin = (fire.get("thesis_origin") or "").strip()
+        statement = (fire.get("thesis_statement") or "").strip()
+        thesis_declared = bool(origin or statement)
+        if thesis_declared:
+            if origin and statement:
+                thesis_detail = f'"{origin}" / "{statement[:40]}{"..." if len(statement) > 40 else ""}"'
+            elif statement:
+                thesis_detail = f'"{statement[:40]}{"..." if len(statement) > 40 else ""}"'
+            else:
+                thesis_detail = f'origin: "{origin}"'
+        else:
+            thesis_detail = "not declared"
+
+        if "thesis" in waivers:
+            checks.append({
+                "name": "thesis",
+                "label": "Thesis declared",
+                "passed": True,
+                "provenance": f"waived ({waivers['thesis']})",
+                "detail": thesis_detail,
+            })
+        else:
+            checks.append({
+                "name": "thesis",
+                "label": "Thesis declared",
+                "passed": thesis_declared,
+                "provenance": "default",
+                "detail": thesis_detail,
+            })
+
         # 1. Playtest evidence
         # Count non-excluded stokes on this fire, or fallback to member flames
         fire_stokes = conn.execute(
@@ -370,7 +401,7 @@ def waive_check(project: Project, check_name: str, reason: str, fire_name: Optio
         raise WyldError("reason is required to waive a gate check", "provide a reason for the waiver")
 
     check_name = check_name.lower().strip()
-    valid_checks = ("playtest", "core_loop", "toys", "scope", "smoke", "embers")
+    valid_checks = ("thesis", "playtest", "core_loop", "toys", "scope", "smoke", "embers")
     if check_name not in valid_checks:
         raise WyldError(
             f"unknown gate check '{check_name}'",

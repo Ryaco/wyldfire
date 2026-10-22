@@ -123,6 +123,66 @@ def remove_flames_cmd(name: str, flames: str):
     click.echo(f"→ removed flames from '{name}': {', '.join(res['removed_flames'])}")
 
 
+@fire.command("set-thesis")
+@click.option("--origin", default=None, help="Origin of the game thesis (freeform)")
+@click.option("--statement", default=None, help="Thesis statement (the argument the game makes)")
+@click.option("--statement-file", type=click.Path(exists=True, path_type=Path), default=None, help="Read thesis statement from file")
+@click.option("--fire", "fire_name", default=None, help="Target fire (defaults to checked out)")
+def set_thesis_cmd(origin: Optional[str], statement: Optional[str], statement_file: Optional[Path], fire_name: Optional[str]):
+    """Declare or update the fire's thesis (the GDD argument)."""
+    project = get_current_project()
+    res = fire_service.set_thesis(
+        project,
+        fire_name=fire_name,
+        origin=origin,
+        statement=statement,
+        statement_file=statement_file,
+    )
+    click.echo(f"→ thesis recorded for fire '{res['fire']}'")
+    if res.get("origin"):
+        click.echo(f"  Origin: {res['origin']}")
+    if res.get("statement"):
+        snippet = res["statement"][:80] + ("..." if len(res["statement"]) > 80 else "")
+        click.echo(f"  Statement: {snippet}")
+
+
+@fire.command("thesis")
+@click.option("--fire", "fire_name", default=None, help="Target fire (defaults to checked out)")
+@click.option("--json", "as_json", is_flag=True, help="Output as JSON")
+def thesis_cmd(fire_name: Optional[str], as_json: bool):
+    """Show the GDD view: thesis, loop, toys, flames, phase."""
+    project = get_current_project()
+    target = fire_service.resolve_fire_name(project, fire_name)
+    data = fire_service.get_fire(project, target)
+    if as_json:
+        output_json({
+            "fire": data["name"],
+            "phase": data["phase"],
+            "thesis_origin": data.get("thesis_origin", ""),
+            "thesis_statement": data.get("thesis_statement", ""),
+            "thesis_locked_at": data.get("thesis_locked_at"),
+            "core_loop": data.get("core_loop", ""),
+            "toys": data.get("toys", []),
+            "flames": [fl["name"] for fl in data.get("flames", [])],
+        })
+        return
+
+    locked = " [LOCKED]" if data.get("thesis_locked_at") else ""
+    click.echo(f"Fire: {data['name']} (phase: {data['phase']})")
+    click.echo(f"\nThesis{locked}:")
+    click.echo(f"  Origin:    {data.get('thesis_origin') or 'not declared'}")
+    click.echo(f"  Statement: {data.get('thesis_statement') or 'not declared'}")
+    click.echo(f"\nCore Loop: {data.get('core_loop') or 'not declared'}")
+    toys = data.get("toys", [])
+    click.echo(f"Toys: {', '.join(toys) if toys else 'none declared'}")
+    click.echo("\nMember Flames:")
+    if data.get("flames"):
+        for fl in data["flames"]:
+            click.echo(f"  - {fl['name']} ({fl['state']})")
+    else:
+        click.echo("  none")
+
+
 @fire.command("set-loop")
 @click.argument("loop")
 @click.option("--fire", "fire_name", default=None, help="Target fire")

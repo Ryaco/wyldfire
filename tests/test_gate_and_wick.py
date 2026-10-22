@@ -27,7 +27,7 @@ def test_gate_waivers_and_laps(temp_project):
     assert not st["all_passed"]
 
     # Waive all checks
-    for check_name in ("playtest", "core_loop", "toys", "scope", "smoke", "embers"):
+    for check_name in ("thesis", "playtest", "core_loop", "toys", "scope", "smoke", "embers"):
         gate_service.waive_check(temp_project, check_name, reason=f"waiving {check_name} for speedrun test")
 
     st2 = gate_service.get_gate_status(temp_project, "card_game")

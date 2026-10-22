@@ -43,7 +43,7 @@ def clone_cmd(server: Optional[str], project_id: str, directory: Optional[str]):
 @click.command("link")
 @click.option("--server", default=None, help="Server URL")
 def link_cmd(server: Optional[str]):
-    """Pair project with a server-side project."""
+    """Register this project with a remote server (the handshake). Does not move events; run 'wyld sync' to exchange events."""
     project = get_current_project()
     res = sync_service.link_project(project, server_url=server)
     click.echo(f"→ paired project '{res['project_name']}' with {res['server_url']}")
@@ -52,7 +52,7 @@ def link_cmd(server: Optional[str]):
 @click.command("sync")
 @click.option("--json", "as_json", is_flag=True, help="Output as JSON")
 def sync_cmd(as_json: bool):
-    """Sync events with remote server (push local, pull remote, apply)."""
+    """Exchange events with remote server (the conversation: push local, pull remote, apply). Run 'wyld link' first to register."""
     project = get_current_project()
     res = sync_service.sync_project(project)
     if as_json:

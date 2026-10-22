@@ -83,7 +83,11 @@ def test_cli_basic_workflow(tmp_path, monkeypatch):
     assert r.exit_code == 0
     assert "checked out fire 'platformer'" in r.output
 
-    # wyld fire set-loop and add-toy
+    # wyld fire set-thesis, set-loop and add-toy
+    r = runner.invoke(cli, ["fire", "set-thesis", "--origin", "platformer inspiration", "--statement", "wall jumping is the core mastery"])
+    assert r.exit_code == 0
+    assert "thesis recorded" in r.output
+
     r = runner.invoke(cli, ["fire", "set-loop", "run -> jump -> collect -> flag"])
     assert r.exit_code == 0
 

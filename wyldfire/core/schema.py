@@ -8,7 +8,9 @@ CREATE TABLE IF NOT EXISTS applied_events (
   id TEXT PRIMARY KEY,
   ts TEXT NOT NULL,
   type TEXT NOT NULL,
-  actor TEXT NOT NULL
+  actor TEXT NOT NULL,
+  actor_email TEXT DEFAULT '',
+  on_behalf_of TEXT DEFAULT ''
 );
 
 CREATE TABLE IF NOT EXISTS fires (
@@ -22,6 +24,9 @@ CREATE TABLE IF NOT EXISTS fires (
   scope_attested_at TEXT,
   scope_attest_note TEXT DEFAULT '',
   slice_bundles_json TEXT NOT NULL DEFAULT '[]',
+  thesis_origin TEXT DEFAULT '',
+  thesis_statement TEXT DEFAULT '',
+  thesis_locked_at TEXT,
   created_at TEXT NOT NULL
 );
 
@@ -30,6 +35,8 @@ CREATE TABLE IF NOT EXISTS flames (
   name TEXT UNIQUE NOT NULL,
   description TEXT DEFAULT '',
   state TEXT NOT NULL DEFAULT 'sparked',
+  materials_path TEXT DEFAULT '',
+  forked_from TEXT DEFAULT '',
   created_at TEXT NOT NULL
 );
 
@@ -46,6 +53,10 @@ CREATE TABLE IF NOT EXISTS flame_versions (
   flame_id INTEGER NOT NULL REFERENCES flames(id) ON DELETE CASCADE,
   n INTEGER NOT NULL,
   notes TEXT NOT NULL,
+  materials_path TEXT DEFAULT '',
+  materials_hash TEXT DEFAULT '',
+  materials_ignore_hash TEXT DEFAULT '',
+  ignore_patterns_json TEXT DEFAULT '[]',
   created_at TEXT NOT NULL,
   UNIQUE (flame_id, n)
 );

@@ -74,6 +74,14 @@ def test_complete_walkthrough(temp_project):
         notes="composition works",
     )
 
+    # $ wyld fire set-thesis
+    fire_service.set_thesis(
+        temp_project,
+        "game",
+        origin="spotting wildfires in forest",
+        statement="Starving a wildfire is more strategic than dousing it directly.",
+    )
+
     # $ wyld fire set-loop "spot fire → cut firebreaks → starve it → score"
     fire_service.set_core_loop(temp_project, "game", "spot fire → cut firebreaks → starve it → score")
 

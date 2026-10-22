@@ -22,6 +22,8 @@ from wyldfire.cli.wick import wick
 from wyldfire.cli.template import template
 from wyldfire.cli.tester import tester
 from wyldfire.cli.metric import metric
+from wyldfire.cli.identity import identity
+from wyldfire.cli.token import token
 from wyldfire.cli.sync import login_cmd, logout_cmd, link_cmd, sync_cmd, doctor_cmd, clone_cmd
 
 
@@ -63,7 +65,9 @@ def cli():
 @cli.command("init")
 @click.argument("name", required=False)
 @click.option("--server", default=None, help="Remote sync server URL")
-def init_cmd(name: Optional[str], server: Optional[str]):
+@click.option("--username", default=None, help="Author username for identity")
+@click.option("--email", default=None, help="Author email for identity")
+def init_cmd(name: Optional[str], server: Optional[str], username: Optional[str], email: Optional[str]):
     """Initialize a new Wyldfire project in the current directory."""
     cwd = Path.cwd()
     if name and cwd.name != name and not (cwd / ".wyld").exists():
@@ -86,6 +90,10 @@ def init_cmd(name: Optional[str], server: Optional[str]):
             )
 
     project = init_project(target_dir, name=name, server_url=server)
+    if username:
+        project.config.set("username", username.strip())
+    if email:
+        project.config.set("email", email.strip())
     click.echo(f"Initialized Wyldfire project '{project.name}' in {target_dir}")
 
 
@@ -131,6 +139,11 @@ def status_cmd(as_json: bool):
         click.echo(f"  Staged: {data['staged_smoke_count']} awaiting stoke commit")
     click.echo(f"Banked Embers: {data['banked_embers_count']}")
 
+    if data.get("drifted_flames"):
+        click.echo("\nDrifted Flames:")
+        for df in data["drifted_flames"]:
+            click.echo(f"  ✗ '{df['name']}' materials changed since v{df['last_version_n']} ({df['materials_path']})")
+
 
 @cli.command("snapshot")
 def snapshot_cmd():
@@ -155,6 +168,8 @@ cli.add_command(wick)
 cli.add_command(template)
 cli.add_command(tester)
 cli.add_command(metric)
+cli.add_command(identity)
+cli.add_command(token)
 
 # Register sync commands
 cli.add_command(login_cmd)

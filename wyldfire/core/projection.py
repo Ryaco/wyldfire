@@ -49,6 +49,25 @@ class ProjectionEngine:
         with self.get_connection() as conn:
             conn.executescript(SCHEMA_SQL)
             conn.commit()
+            migrations = [
+                "ALTER TABLE flames ADD COLUMN materials_path TEXT DEFAULT ''",
+                "ALTER TABLE flames ADD COLUMN forked_from TEXT DEFAULT ''",
+                "ALTER TABLE flame_versions ADD COLUMN materials_path TEXT DEFAULT ''",
+                "ALTER TABLE flame_versions ADD COLUMN materials_hash TEXT DEFAULT ''",
+                "ALTER TABLE flame_versions ADD COLUMN materials_ignore_hash TEXT DEFAULT ''",
+                "ALTER TABLE flame_versions ADD COLUMN ignore_patterns_json TEXT DEFAULT '[]'",
+                "ALTER TABLE fires ADD COLUMN thesis_origin TEXT DEFAULT ''",
+                "ALTER TABLE fires ADD COLUMN thesis_statement TEXT DEFAULT ''",
+                "ALTER TABLE fires ADD COLUMN thesis_locked_at TEXT",
+                "ALTER TABLE applied_events ADD COLUMN actor_email TEXT DEFAULT ''",
+                "ALTER TABLE applied_events ADD COLUMN on_behalf_of TEXT DEFAULT ''",
+            ]
+            for sql in migrations:
+                try:
+                    conn.execute(sql)
+                except Exception:
+                    pass
+            conn.commit()
 
     def is_applied(self, event_id: str) -> bool:
         with self.get_connection() as conn:
@@ -62,9 +81,11 @@ class ProjectionEngine:
             if cursor.fetchone() is not None:
                 return False  # Already applied
 
+            actor_email = getattr(event, "actor_email", "") or ""
+            on_behalf_of = getattr(event, "on_behalf_of", "") or ""
             cursor.execute(
-                "INSERT INTO applied_events (id, ts, type, actor) VALUES (?, ?, ?, ?)",
-                (event.id, event.ts, event.type, event.actor),
+                "INSERT INTO applied_events (id, ts, type, actor, actor_email, on_behalf_of) VALUES (?, ?, ?, ?, ?, ?)",
+                (event.id, event.ts, event.type, event.actor, actor_email, on_behalf_of),
             )
             self._dispatch_event(conn, event)
             conn.commit()
@@ -79,33 +100,49 @@ class ProjectionEngine:
         if t == "flame.sparked":
             name = p["name"]
             desc = p.get("description", "")
+            materials_path = p.get("materials_path", "")
+            forked_from = p.get("forked_from", "")
+            materials_hash = p.get("materials_hash", "")
+            materials_ignore_hash = p.get("materials_ignore_hash", "")
+            ignore_patterns_json = json.dumps(p.get("ignore_patterns", []))
             cursor = conn.execute(
-                "INSERT INTO flames (name, description, state, created_at) VALUES (?, ?, ?, ?)",
-                (name, desc, FLAME_SPARKED, ts),
+                "INSERT INTO flames (name, description, state, materials_path, forked_from, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+                (name, desc, FLAME_SPARKED, materials_path, forked_from, ts),
             )
             flame_id = cursor.lastrowid
             conn.execute(
-                "INSERT INTO flame_versions (flame_id, n, notes, created_at) VALUES (?, ?, ?, ?)",
-                (flame_id, 1, "Initial spark", ts),
+                "INSERT INTO flame_versions (flame_id, n, notes, materials_path, materials_hash, materials_ignore_hash, ignore_patterns_json, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                (flame_id, 1, "Initial spark", materials_path, materials_hash, materials_ignore_hash, ignore_patterns_json, ts),
             )
 
         elif t == "flame.versioned":
             name = p["name"]
             notes = p.get("notes", "")
-            row = conn.execute("SELECT id, state FROM flames WHERE name = ?", (name,)).fetchone()
+            materials_path = p.get("materials_path")
+            materials_hash = p.get("materials_hash", "")
+            materials_ignore_hash = p.get("materials_ignore_hash", "")
+            ignore_patterns = p.get("ignore_patterns", [])
+            ignore_patterns_json = json.dumps(ignore_patterns) if ignore_patterns else "[]"
+            row = conn.execute("SELECT id, state, materials_path FROM flames WHERE name = ?", (name,)).fetchone()
             if row:
                 flame_id, state = row["id"], row["state"]
+                effective_mat_path = materials_path if materials_path is not None else (row["materials_path"] or "")
+                if materials_path is not None:
+                    conn.execute("UPDATE flames SET materials_path = ? WHERE id = ?", (materials_path, flame_id))
                 max_row = conn.execute(
                     "SELECT coalesce(max(n), 0) as max_n FROM flame_versions WHERE flame_id = ?",
                     (flame_id,),
                 ).fetchone()
                 next_n = (max_row["max_n"] if max_row else 0) + 1
                 conn.execute(
-                    "INSERT INTO flame_versions (flame_id, n, notes, created_at) VALUES (?, ?, ?, ?)",
-                    (flame_id, next_n, notes, ts),
+                    "INSERT INTO flame_versions (flame_id, n, notes, materials_path, materials_hash, materials_ignore_hash, ignore_patterns_json, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                    (flame_id, next_n, notes, effective_mat_path, materials_hash, materials_ignore_hash, ignore_patterns_json, ts),
                 )
                 if next_n >= 2 and state == FLAME_SPARKED:
                     conn.execute("UPDATE flames SET state = ? WHERE id = ?", (FLAME_BURNING, flame_id))
+
+        elif t == "flame.renamed":
+            conn.execute("UPDATE flames SET name = ? WHERE name = ?", (p["new_name"], p["old_name"]))
 
         elif t == "flame.crowned":
             conn.execute("UPDATE flames SET state = ? WHERE name = ?", (FLAME_CROWNED, p["name"]))
@@ -145,11 +182,18 @@ class ProjectionEngine:
                     # Mark flame as tested if sparked or burning
                     if flame_row["state"] in (FLAME_SPARKED, FLAME_BURNING):
                         conn.execute("UPDATE flames SET state = ? WHERE id = ?", (FLAME_TESTED, target_id))
-                    # Get latest version id
-                    v_row = conn.execute(
-                        "SELECT id FROM flame_versions WHERE flame_id = ? ORDER BY n DESC LIMIT 1",
-                        (target_id,),
-                    ).fetchone()
+                    # If pinned_version_n is given, locate that specific version
+                    pinned_n = p.get("pinned_version_n")
+                    if pinned_n is not None:
+                        v_row = conn.execute(
+                            "SELECT id FROM flame_versions WHERE flame_id = ? AND n = ?",
+                            (target_id, pinned_n),
+                        ).fetchone()
+                    else:
+                        v_row = conn.execute(
+                            "SELECT id FROM flame_versions WHERE flame_id = ? ORDER BY n DESC LIMIT 1",
+                            (target_id,),
+                        ).fetchone()
                     if v_row:
                         flame_version_id = v_row["id"]
                 else:
@@ -360,6 +404,12 @@ class ProjectionEngine:
         elif t == "fire.loop_set":
             conn.execute("UPDATE fires SET core_loop = ? WHERE name = ?", (p["core_loop"], p["name"]))
 
+        elif t == "fire.thesis_set":
+            conn.execute(
+                "UPDATE fires SET thesis_origin = ?, thesis_statement = ? WHERE name = ?",
+                (p.get("origin", ""), p.get("statement", ""), p["fire"]),
+            )
+
         elif t == "fire.toy_added":
             name = p["name"]
             toy = p["toy"]
@@ -424,6 +474,8 @@ class ProjectionEngine:
                 fire_id = f_row["id"]
                 new_phase = PHASE_PRODUCTION if is_lap else PHASE_GATE_PART2
                 conn.execute("UPDATE fires SET phase = ? WHERE id = ?", (new_phase, fire_id))
+                if not is_lap:
+                    conn.execute("UPDATE fires SET thesis_locked_at = ? WHERE id = ?", (ts, fire_id))
                 conn.execute(
                     "INSERT INTO gate_verdicts (fire_id, kind, lap_no, verdict, reasons_json, created_at) "
                     "VALUES (?, ?, ?, ?, ?, ?)",

@@ -44,6 +44,9 @@ def get_project_status(project: Project) -> Dict[str, Any]:
             (EMBER_BANKED,),
         ).fetchone()["cnt"]
 
+    from wyldfire.core.materials import find_drifted_flames
+    drifted_flames = find_drifted_flames(project)
+
     return {
         "project_name": project.name,
         "checked_out_fire": current_fire_name,
@@ -52,4 +55,5 @@ def get_project_status(project: Project) -> Dict[str, Any]:
         "open_smoke": open_smoke,
         "staged_smoke_count": staged_smoke_count,
         "banked_embers_count": banked_embers,
+        "drifted_flames": drifted_flames,
     }
