@@ -35,6 +35,9 @@ def test_server_token_fail_fast_at_startup(monkeypatch):
     mock_app = type("MockFastAPI", (), {
         "get": lambda self, *a, **k: (lambda f: f),
         "post": lambda self, *a, **k: (lambda f: f),
+        "delete": lambda self, *a, **k: (lambda f: f),
+        "put": lambda self, *a, **k: (lambda f: f),
+        "patch": lambda self, *a, **k: (lambda f: f),
     })()
     monkeypatch.setattr("wyldfire.server.app.FastAPI", lambda **kw: mock_app)
     # Ensure Depends/Header are callable no-ops so route definitions work
@@ -68,9 +71,21 @@ def test_credentials_file_permissions(tmp_path: Path, monkeypatch: pytest.Monkey
 # Issue 5: wyld link UX fallback and wyld init --server update
 # -------------------------------------------------------------------------
 
-def test_link_uses_single_credential_fallback(temp_project: Project, monkeypatch: pytest.MonkeyPatch):
-    """When project has no server_url, link uses single stored credential."""
-    save_credential("https://single.example.com", "token-123")
+def test_link_uses_registered_remote(temp_project: Project, monkeypatch: pytest.MonkeyPatch):
+    """Link resolves the project's remote by name and stores it in config."""
+    from wyldfire.core import remotes as remotes_mod
+    from wyldfire.core import credentials as creds_mod
+
+    remotes_mod.add_remote("main", "https://single.example.com")
+    creds_mod.set_remote_auth("main", {
+        "session_token": "wyld_sess_fake",
+        "session_expires_at": "2999-01-01T00:00:00Z",
+        "held_token": "wyld_sess_held",
+        "held_kind": "user",
+        "username": "ryan",
+        "email": "ryan@example.com",
+        "role": "member",
+    })
 
     class FakeResponse:
         def __enter__(self):
@@ -85,8 +100,10 @@ def test_link_uses_single_credential_fallback(temp_project: Project, monkeypatch
 
     monkeypatch.setattr(urllib.request, "urlopen", lambda req, timeout=10.0: FakeResponse())
 
-    res = sync_service.link_project(temp_project)
+    res = sync_service.link_project(temp_project, remote="main")
     assert res["server_url"] == "https://single.example.com"
+    assert res["remote"] == "main"
+    assert temp_project.config.get("remote") == "main"
     assert temp_project.config.get("server_url") == "https://single.example.com"
 
 
@@ -233,8 +250,24 @@ def test_file_variants_for_long_text_flags(temp_project: Project, tmp_path: Path
 
 def test_wyld_clone_workflow(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, runner: CliRunner):
     """wyld clone connects to server, links project ID, and pulls full event log."""
+    from wyldfire.core import remotes as remotes_mod
+    from wyldfire.core import credentials as creds_mod
+
     server_url = "https://sync.example.com"
-    save_credential(server_url, "test-token")
+    # The test's global config is patched below via get_credentials_path;
+    # register the remote and a valid session before cloning.
+    global_config = tmp_path / ".global_config"
+    monkeypatch.setattr("wyldfire.core.config.get_credentials_path", lambda: global_config / "credentials")
+    remotes_mod.add_remote("sync", server_url)
+    creds_mod.set_remote_auth("sync", {
+        "session_token": "wyld_sess_fake",
+        "session_expires_at": "2999-01-01T00:00:00Z",
+        "held_token": "wyld_sess_held",
+        "held_kind": "user",
+        "username": "ryan",
+        "email": "ryan@example.com",
+        "role": "member",
+    })
 
     # Fake server that holds an existing project with events
     ev1 = create_event("flame.sparked", {"name": "remote-flame", "description": "from remote"})
@@ -262,7 +295,7 @@ def test_wyld_clone_workflow(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, ru
                     }
                 }).encode("utf-8")
             elif "/api/v1/events" in self.url and self.method == "POST":
-                return json.dumps({"status": "ok", "accepted": 0, "skipped": 0}).encode("utf-8")
+                return json.dumps({"status": "ok", "accepted": 0, "skipped": 0, "rejected": []}).encode("utf-8")
             elif "/api/v1/events" in self.url and self.method == "GET":
                 return json.dumps({
                     "status": "ok",
@@ -274,15 +307,16 @@ def test_wyld_clone_workflow(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, ru
     monkeypatch.setattr(urllib.request, "urlopen", lambda req, timeout=15.0: MockServerHandler(req))
 
     clone_dest = tmp_path / "cloned_game"
-    r = runner.invoke(cli, ["clone", "--server", server_url, "--project", "proj-remote-uuid", str(clone_dest)])
+    r = runner.invoke(cli, ["clone", "--remote", "sync", "--project", "proj-remote-uuid", str(clone_dest)])
     assert r.exit_code == 0, f"Clone failed: {r.output}"
-    assert "cloned project 'Super Remote Game' (proj-remote-uuid)" in r.output
+    assert "joined project Super Remote Game as ryan (member)" in r.output
     assert "pulled 2 events" in r.output
 
     # Check local cloned project state
     cloned_proj = Project(clone_dest)
     assert cloned_proj.project_id == "proj-remote-uuid"
     assert cloned_proj.name == "Super Remote Game"
+    assert cloned_proj.config.get("remote") == "sync"
     assert cloned_proj.config.get("server_url") == server_url
 
     # Check that events were projected locally into SQLite
@@ -291,6 +325,6 @@ def test_wyld_clone_workflow(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, ru
     assert len(flame["versions"]) == 2
 
     # Cloning again into existing directory must fail
-    r2 = runner.invoke(cli, ["clone", "--server", server_url, "--project", "proj-remote-uuid", str(clone_dest)])
+    r2 = runner.invoke(cli, ["clone", "--remote", "sync", "--project", "proj-remote-uuid", str(clone_dest)])
     assert r2.exit_code != 0
     assert "already initialized" in r2.output

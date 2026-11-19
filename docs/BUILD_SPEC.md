@@ -1,4 +1,10 @@
-# Wyldfire — Build Specification (v1)
+# Wyldfire — Build Specification (v0.2.0)
+
+> v0.2.0 folds in `UPDATE_SPEC.md` (decisions 2026-11-19): the users
+> build — accounts, MFA, remotes, agent tokens, sessions, signup
+> requests, project membership, and server-side enforcement. That file
+> remains the detailed auth reference; this spec is the canonical
+> whole-app spec as of 0.2.0.
 
 > Self-contained handoff for implementing Wyldfire. Everything an engineer (human
 > or agent) needs to build the v1 CLI. Decided items are stated as fact;
@@ -364,17 +370,54 @@ wyld init [name] [--server <url>]  # create .wyld/ here, register in ~/.wyld/reg
 wyld status [--json]        # dashboard: fires+phases, checked-out fire, wick position, open smoke counts
 ```
 
-### wyld sync — hosted sync (v1, offline-first)
+### wyld remote — servers & auth (v0.2.0; replaces the v1 shared token)
+
+Remotes are global (not per-project) and live in
+`~/.config/wyldfire/remotes.toml`. Project configs store the remote
+*name*; the URL resolves at runtime. Top-level `wyld login` / `logout` /
+`signup` from v1 were removed — auth lives under `wyld remote`.
 ```
-wyld login --server <url>   # prompt for API token, store in ~/.config/wyldfire/credentials (0600; never in project)
-wyld logout                 # forget the token for this server
-wyld link [--server <url>]  # pair this project with a server-side project (creates it if needed);
-                            # with no URL and exactly one stored credential, uses it; with several,
-                            # suggests them ("did you mean --server <url>?")
-wyld clone --server <url> --project <id> [directory]
+wyld remote add <name> <url>        # register a server under a name
+wyld remote list                    # remotes + login state
+wyld remote show <name>             # URL, login state, projects using it
+wyld remote set-url <name> <url>    # re-point (stored session cleared)
+wyld remote rename <old> <new>      # rewrites referencing project configs
+wyld remote remove <name>           # also deletes the stored session/token
+wyld remote set-default <name>
+wyld remote login [name] [--admin] [--user NAME] [--force]
+                                    # user login: password + TOTP (enrollment
+                                    # inside the login when not yet enrolled);
+                                    # --admin: master token + TOTP; first
+                                    # admin login bootstraps the admin account
+wyld remote signup [name]           # request an account (admin approval;
+                                    # never instant access; optional MFA at signup)
+wyld remote logout [name]           # revoke session + held token server-side
+wyld remote rotate-master [name]    # hard cutover; user tokens survive
+wyld token mint --name <n> [--remote NAME]   # server-registered agent token
+wyld token list [--remote NAME]              # with last-used
+wyld token revoke <name> [--remote NAME]
+wyld session list [--all] [--remote NAME]    # --all is admin: every user
+wyld session revoke <id> [--remote NAME]
+wyld session revoke-all [--all] [--remote NAME]
+wyld req list [--status open|approved|denied] [--remote NAME]
+wyld req show <id> [--remote NAME]           # show before the verdict
+wyld req approve <id> [--remote NAME]
+wyld req deny <id> [--remote NAME] [--reason ...]
+wyld project add-member <username> [--role member|admin] [--remote NAME]
+wyld project members [--remote NAME]
+```
+
+### wyld sync — hosted sync (v0.2.0, offline-first)
+```
+wyld link [--remote <name> | --server <url>]  # pair this project with a
+                            # server-side project (creates it if needed);
+                            # the linker becomes Owner. --server is the
+                            # ad-hoc escape hatch for unregistered servers.
+wyld clone --remote <name> --project <id> [directory]
                             # join an existing project on a new machine: writes the project id +
-                            # server URL into a fresh local config, then pulls the full event history
-wyld sync [--json]          # push local events, pull remote events, apply, print sync report
+                            # remote name into a fresh local config, then pulls the full event history
+wyld sync [--json] [--remote <name>]  # push local events, pull remote events,
+                            # apply, print sync report (with identity + rejections)
 wyld doctor [--json]        # orphans, rejected events, possible duplicates needing a human
 ```
 
@@ -615,6 +658,11 @@ templates welcome). `gate plan-done --note` requires:
 | 11 | Scope-change ceremony | content: logged reason + ETA impact shown; mechanical: not a scope change (ember/lap) | decided |
 | 12 | Storage | hybrid: JSONL event log is the source of truth, SQLite is a disposable projection | decided |
 | 13 | Sync | v1: hosted service, offline-first, server = merge point; deterministic collision policy (§13) | decided |
+| 14 | Master token after bootstrap | stays valid as alternate admin login/recovery | decided 2026-11-19 |
+| 15 | Spec filename | standing `UPDATE_SPEC.md` (not dated) | decided 2026-11-19 |
+| 16 | Version | 0.2.0 | decided 2026-11-19 |
+| 17 | Project creation | any logged-in user can create, becomes Owner | decided 2026-11-19 |
+| 18 | Agent token expiry | none by default; valid until revoked, last-used shown | decided 2026-11-19 |
 
 ## 11. Build milestones (with acceptance)
 
@@ -637,11 +685,20 @@ templates welcome). `gate plan-done --note` requires:
   *Accept: full run prototype→ship, plus a lap adding a flame.*
 - **M6 — polish.** `status` dashboard, `--json` everywhere, shell completion,
   `pytest` suite green, README.
-- **M7 — sync.** event push/pull, `login`/`link`/`sync`/`doctor`, offline
-  queue, idempotent apply, collision policy (§13) with sync report.
+- **M7 — sync.** event push/pull, `remote add`/`link`/`sync`/`doctor`,
+  offline queue, idempotent apply, collision policy (§13) with sync report.
   *Accept: two clients edit offline — a conflicting scalar edit, an
   add-vs-delete, concurrent smoke transitions; after sync both converge,
   nothing is lost, and the report explains every resolution.*
+- **M8 — users (0.2.0).** accounts with argon2id + TOTP, master-token
+  bootstrap/recovery, remotes, server-registered agent tokens (member
+  scope), 90-day sliding sessions, signup requests with admin approval,
+  project membership (creator is Owner), server-side enforcement of the
+  judgment boundary (agent tokens cannot record gate verdicts). *Accept:
+  admin bootstrap → signup → approve → login → token mint → link → sync
+  end to end against a live server; an agent token pushing a gate verdict
+  gets a reported rejection; a non-member pushing to a project gets a
+  membership error; pytest suite green.*
 
 Work milestone by milestone; each must be demoable before the next.
 
@@ -678,7 +735,7 @@ $ wyld gate plan-done --note "iteration 1 covers areas 1-3"  # → production
 $ wyld fire ship                      # → shipped
 ```
 
-## 13. Sync — offline/online hybrid (v1)
+## 13. Sync — offline/online hybrid (v0.2.0)
 
 wyld is **offline-first**: every mutation appends to the local event log
 immediately, and the tool always works with no network. When the server is
@@ -687,7 +744,7 @@ push + pull + apply and prints a report. No network → work locally, sync
 later. The server is the **merge point**, not the sole origin — either side
 can originate events.
 
-### Server (v1)
+### Server (v0.2.0)
 
 - **Stack:** FastAPI + SQLite, single-tenant personal use (Postgres later if
   ever needed).
@@ -699,22 +756,46 @@ can originate events.
   (Render free) wake too slowly for a CLI client; prefer always-on.
   - Server state (SQLite) lives in the `/data` volume — back it up; it
     holds the merge point's copy of every event.
-  - The API token is supplied via the `WYLD_SERVER_TOKEN` env var at
+  - The master token is supplied via the `WYLD_SERVER_TOKEN` env var at
     deploy time, never baked into the image. The server **refuses to start**
     without it — there is no default token (fail-fast); a misconfigured
     deploy crashes loudly instead of running on a publicly-known secret.
+    On first boot after the 0.2.0 upgrade the env token is hashed into the
+    database (value unchanged); the database is authoritative from then on.
   - Health check: `GET /health`.
-- **Auth:** single API token generated at server setup. `wyld login --server
-  <url>` prompts for it once and stores it in
-  `~/.config/wyldfire/credentials` — never in the project directory. The
-  credentials file is written with `0600` permissions (config dir `0700`).
-- **API (v1 minimal):**
+- **Auth (v0.2.0):** users with argon2id passwords (min 12 chars) and TOTP
+  (MFA required for everyone). The master token is the bootstrap/recovery
+  credential: the first admin login creates the admin account (atomic —
+  aborting before a TOTP code verifies leaves no user behind) and
+  backfills existing projects' owner to the admin; after bootstrap the
+  master token stays valid as an alternate admin login. Signup is a
+  request + admin approval, never instant access; denial deletes the
+  pending account and its TOTP secret. Sessions last 90 days, sliding,
+  renewed silently from a held token (user token, or the master token for
+  the admin). Agent tokens are server-registered, member scope even for
+  admins, no expiry by default, revocable, last-used shown. Revoking a
+  user cascades to their agent tokens, sessions, and held tokens; past
+  events stay in history. 5 failed logins → 15-minute lockout. Full
+  detail: `UPDATE_SPEC.md` §1.
+- **Enforcement:** the CLI is untrusted — every call is verified
+  server-side. The server replaces identity stamps with the token owner's
+  identity, and refuses judgment events from agent tokens (gate verdicts,
+  attestations, waivers, exclusions, crowning, shipping, smoke
+  diagnosis/clearing, metric scoring) as reported rejections, never
+  silently dropped. Project membership gates link/push/pull; any
+  logged-in user may create a project and becomes its Owner.
+- **API (v0.2.0):**
   - `POST /api/v1/events` — push a batch of events. Idempotent by UUID: the
-    server appends unseen events, skips known ones, returns
-    `{accepted, skipped}`.
+    server appends unseen events, skips known ones, and reports refused
+    ones: `{accepted, skipped, rejected}`.
   - `GET /api/v1/events?since=<ts>` — pull events newer than `since`.
   - `POST /api/v1/projects` — create-or-get the server-side project record
     backing `wyld link` and `wyld clone`.
+  - Auth API: `POST /api/v1/auth/signup|login|admin-login|refresh|logout|rotate-master`,
+    `GET /api/v1/auth/me|master-audit`; `POST|GET|DELETE /api/v1/tokens`;
+    `GET|DELETE /api/v1/sessions`, `POST /api/v1/sessions/revoke-all`;
+    `GET /api/v1/users`, `POST /api/v1/users/{id}/revoke`;
+    `GET|POST /api/v1/requests...`; `GET|POST /api/v1/projects/{id}/members`.
 - **UI state never syncs:** the checked-out fire, cursor positions, and other
   per-machine UI state stay local. Only domain events travel.
 

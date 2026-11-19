@@ -7,54 +7,38 @@ import urllib.request
 import urllib.error
 
 from wyldfire.core.project import Project
-from wyldfire.core.config import (
-    load_credentials,
-    save_credential,
-    remove_credential,
-)
+from wyldfire.core import remotes
 from wyldfire.core.events import Event
 from wyldfire.core.exceptions import WyldError
 from wyldfire.core.constants import SMOKE_STAGED
+from wyldfire.services import auth_service
 
 
-def login_server(server_url: str, token: str) -> None:
-    server_url = server_url.rstrip("/")
-    if not server_url.startswith("http://") and not server_url.startswith("https://"):
-        raise WyldError(f"invalid server URL '{server_url}'", "must start with http:// or https://")
-    if not token.strip():
-        raise WyldError("API token cannot be empty", "provide a valid API token")
-    save_credential(server_url, token.strip())
+def _project_remote(project: Project, remote_opt: Optional[str] = None):
+    """Resolve (remote_name, url) for a project.
 
-
-def logout_server(server_url: Optional[str] = None) -> None:
-    remove_credential(server_url)
-
-
-def link_project(project: Project, server_url: Optional[str] = None) -> Dict[str, Any]:
-    creds = load_credentials()
-    target_server = server_url or project.config.get("server_url")
-    if not target_server:
-        if len(creds) == 1:
-            target_server = next(iter(creds.keys()))
-        elif len(creds) > 1:
-            known = ", ".join(creds.keys())
-            raise WyldError(
-                "no server URL provided and multiple servers configured in credentials",
-                f"did you mean --server <url>? Configured servers: {known}",
-            )
-        else:
-            raise WyldError(
-                "no server URL provided and no credentials found",
-                "run 'wyld login --server <url>' first, or specify 'wyld link --server <url>'",
-            )
-    target_server = target_server.rstrip("/")
-
-    token = creds.get(target_server)
-    if not token:
+    --remote wins; else the project's stored remote name; else the legacy
+    server_url, which needs a re-link to adopt a name (sessions are keyed
+    by remote name, so a bare URL cannot authenticate).
+    """
+    if remote_opt:
+        return remotes.resolve_remote(remote_opt)
+    stored_name = project.config.get("remote")
+    if stored_name:
+        return remotes.resolve_remote(stored_name)
+    stored_url = project.config.get("server_url")
+    if stored_url:
         raise WyldError(
-            f"not logged in to {target_server}",
-            f"run 'wyld login --server {target_server}' first"
+            "project links to a server by URL, not by remote name",
+            "re-link once with 'wyld link --remote <name>' to adopt the remote name",
         )
+    raise WyldError("project is not linked to a server", "run 'wyld link --remote <name>' first")
+
+
+def link_project(project: Project, remote: Optional[str] = None, server_url: Optional[str] = None) -> Dict[str, Any]:
+    remote_name, target_server = remotes.resolve_remote(remote, server_url)
+    token = auth_service.ensure_session(remote_name, target_server)
+    identity = auth_service.get_stored_auth(remote_name) or {}
 
     # Call POST /api/v1/projects to pair / create
     url = f"{target_server}/api/v1/projects"
@@ -69,17 +53,29 @@ def link_project(project: Project, server_url: Optional[str] = None) -> Dict[str
     try:
         with urllib.request.urlopen(req, timeout=10.0) as resp:
             data = json.loads(resp.read().decode("utf-8"))
+            if remote_name:
+                project.config.set("remote", remote_name)
             project.config.set("server_url", target_server)
             server_proj = data.get("project", {})
             if server_proj.get("name"):
                 project.config.set("name", server_proj["name"])
             return {
+                "remote": remote_name,
                 "server_url": target_server,
                 "project_name": project.name,
                 "project_id": project.project_id,
                 "status": "linked",
+                "created": data.get("created", False),
+                "username": identity.get("username", ""),
+                "role": identity.get("role", "member"),
                 "server_response": data,
             }
+    except urllib.error.HTTPError as e:
+        try:
+            detail = json.loads(e.read().decode("utf-8")).get("detail", e.reason)
+        except Exception:
+            detail = e.reason
+        raise WyldError(f"failed to link with server at {target_server}: {detail}", "check membership and login")
     except Exception as e:
         raise WyldError(f"failed to link with server at {target_server}: {e}", "check network and token")
 
@@ -87,6 +83,7 @@ def link_project(project: Project, server_url: Optional[str] = None) -> Dict[str
 def clone_project(
     target_dir: Path,
     project_id: str,
+    remote: Optional[str] = None,
     server_url: Optional[str] = None,
 ) -> Dict[str, Any]:
     target_dir = target_dir.resolve()
@@ -97,30 +94,9 @@ def clone_project(
             "choose a different directory or remove existing .wyld/ to re-clone",
         )
 
-    creds = load_credentials()
-    target_server = server_url
-    if not target_server:
-        if len(creds) == 1:
-            target_server = next(iter(creds.keys()))
-        elif len(creds) > 1:
-            known = ", ".join(creds.keys())
-            raise WyldError(
-                "no server URL provided and multiple servers configured in credentials",
-                f"specify one with 'wyld clone --server <url>' (configured: {known})",
-            )
-        else:
-            raise WyldError(
-                "no server URL provided and no credentials found",
-                "run 'wyld login --server <url>' first, or specify '--server <url>'",
-            )
-    target_server = target_server.rstrip("/")
-
-    token = creds.get(target_server)
-    if not token:
-        raise WyldError(
-            f"not logged in to {target_server}",
-            f"run 'wyld login --server {target_server}' first",
-        )
+    remote_name, target_server = remotes.resolve_remote(remote, server_url)
+    token = auth_service.ensure_session(remote_name, target_server)
+    identity = auth_service.get_stored_auth(remote_name) or {}
 
     # Create directories
     target_dir.mkdir(parents=True, exist_ok=True)
@@ -136,6 +112,8 @@ def clone_project(
     from wyldfire.core.config import ProjectConfig, register_project
     config = ProjectConfig(wyld_dir)
     config.set("project_id", project_id)
+    if remote_name:
+        config.set("remote", remote_name)
     config.set("server_url", target_server)
     config.set("mode", "offline-first")
     config.set("name", target_dir.name)
@@ -153,7 +131,7 @@ def clone_project(
     project = Project(target_dir)
 
     # Link with server to confirm pairing and fetch project metadata
-    link_res = link_project(project, server_url=target_server)
+    link_res = link_project(project, remote=remote_name, server_url=target_server)
 
     # Pull history from server
     sync_res = sync_project(project)
@@ -168,26 +146,20 @@ def clone_project(
         "project": project,
         "project_id": project_id,
         "project_name": project.name,
+        "remote": remote_name,
         "server_url": target_server,
+        "username": identity.get("username", ""),
+        "role": identity.get("role", "member"),
         "target_dir": target_dir,
         "link": link_res,
         "sync": sync_res,
     }
 
 
-def sync_project(project: Project) -> Dict[str, Any]:
-    server_url = project.config.get("server_url")
-    if not server_url:
-        raise WyldError("project is not linked to a server", "run 'wyld link --server <url>' first")
-
-    creds = load_credentials()
-    token = creds.get(server_url.rstrip("/"))
-    if not token:
-        raise WyldError(
-            f"not logged in to {server_url}",
-            f"run 'wyld login --server {server_url}' first"
-        )
-
+def sync_project(project: Project, remote: Optional[str] = None) -> Dict[str, Any]:
+    remote_name, server_url = _project_remote(project, remote)
+    token = auth_service.ensure_session(remote_name, server_url)
+    identity = auth_service.get_stored_auth(remote_name) or {}
     server_url = server_url.rstrip("/")
 
     # 1. Read all local events
@@ -209,11 +181,19 @@ def sync_project(project: Project) -> Dict[str, Any]:
 
     pushed_accepted = 0
     pushed_skipped = 0
+    rejected: List[Dict[str, Any]] = []
     try:
         with urllib.request.urlopen(push_req, timeout=15.0) as resp:
             push_res = json.loads(resp.read().decode("utf-8"))
             pushed_accepted = push_res.get("accepted", 0)
             pushed_skipped = push_res.get("skipped", 0)
+            rejected = push_res.get("rejected", [])
+    except urllib.error.HTTPError as e:
+        try:
+            detail = json.loads(e.read().decode("utf-8")).get("detail", e.reason)
+        except Exception:
+            detail = e.reason
+        raise WyldError(f"failed to push events to {server_url}: {detail}", "check membership and login")
     except Exception as e:
         raise WyldError(f"failed to push events to {server_url}: {e}", "check server connection")
 
@@ -246,14 +226,24 @@ def sync_project(project: Project) -> Dict[str, Any]:
                 latest_remote_ts = remote_events[-1].get("ts")
                 if latest_remote_ts:
                     project.config.set("last_synced_ts", latest_remote_ts)
+    except urllib.error.HTTPError as e:
+        try:
+            detail = json.loads(e.read().decode("utf-8")).get("detail", e.reason)
+        except Exception:
+            detail = e.reason
+        raise WyldError(f"failed to pull events from {server_url}: {detail}", "check membership and login")
     except Exception as e:
         raise WyldError(f"failed to pull events from {server_url}: {e}", "check server connection")
 
     return {
+        "remote": remote_name,
         "server_url": server_url,
+        "username": identity.get("username", ""),
+        "role": identity.get("role", "member"),
         "pushed_events": len(local_events),
         "server_accepted": pushed_accepted,
         "server_skipped": pushed_skipped,
+        "rejected": rejected,
         "pulled_events": pulled_count,
         "conflicts": conflicts_resolved,
     }

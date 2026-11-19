@@ -21,10 +21,36 @@ def test_identity_set_and_show(temp_project, runner, monkeypatch):
 
 def test_token_mint_list_revoke(temp_project, runner, monkeypatch):
     monkeypatch.chdir(temp_project.root_dir)
+    runner.invoke(cli, ["remote", "add", "main", "https://example.com"])
+    # Fake a logged-in session and a server-side token registry.
+    monkeypatch.setattr(
+        "wyldfire.services.auth_service.ensure_session",
+        lambda name, url: "wyld_sess_fake",
+    )
+    store: dict = {}
+
+    def fake_mint(url, session, name):
+        if name in store:
+            from wyldfire.core.exceptions import WyldError
+            raise WyldError(f"agent token '{name}' already exists — revoke it first", "revoke it first")
+        store[name] = {"name": name, "scope": "member", "created": "2026-11-19",
+                       "last_used": None, "token": f"wyld_at_fake-{name}"}
+        return {"status": "ok", "name": name, "token": store[name]["token"]}
+
+    monkeypatch.setattr("wyldfire.services.auth_service.mint_agent_token", fake_mint)
+    monkeypatch.setattr(
+        "wyldfire.services.auth_service.list_agent_tokens",
+        lambda url, session: list(store.values()),
+    )
+    monkeypatch.setattr(
+        "wyldfire.services.auth_service.revoke_agent_token",
+        lambda url, session, name: store.pop(name),
+    )
 
     result = runner.invoke(cli, ["token", "mint", "--name", "alder"])
     assert result.exit_code == 0, result.output
     assert "minted" in result.output
+    assert "wyld_at_fake-alder" in result.output
 
     result2 = runner.invoke(cli, ["token", "list"])
     assert result2.exit_code == 0, result2.output
@@ -40,6 +66,22 @@ def test_token_mint_list_revoke(temp_project, runner, monkeypatch):
 
 def test_token_mint_duplicate_fails(temp_project, runner, monkeypatch):
     monkeypatch.chdir(temp_project.root_dir)
+    runner.invoke(cli, ["remote", "add", "main", "https://example.com"])
+    monkeypatch.setattr(
+        "wyldfire.services.auth_service.ensure_session",
+        lambda name, url: "wyld_sess_fake",
+    )
+    minted: set = set()
+
+    def fake_mint(url, session, name):
+        if name in minted:
+            from wyldfire.core.exceptions import WyldError
+            raise WyldError(f"agent token '{name}' already exists — revoke it first", "revoke it first")
+        minted.add(name)
+        return {"status": "ok", "name": name, "token": "wyld_at_fake"}
+
+    monkeypatch.setattr("wyldfire.services.auth_service.mint_agent_token", fake_mint)
+
     runner.invoke(cli, ["token", "mint", "--name", "alder"])
     result = runner.invoke(cli, ["token", "mint", "--name", "alder"])
     assert result.exit_code != 0

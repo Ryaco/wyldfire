@@ -24,7 +24,11 @@ from wyldfire.cli.tester import tester
 from wyldfire.cli.metric import metric
 from wyldfire.cli.identity import identity
 from wyldfire.cli.token import token
-from wyldfire.cli.sync import login_cmd, logout_cmd, link_cmd, sync_cmd, doctor_cmd, clone_cmd
+from wyldfire.cli.remote import remote
+from wyldfire.cli.session import session
+from wyldfire.cli.req import req
+from wyldfire.cli.project import project as project_group
+from wyldfire.cli.sync import link_cmd, sync_cmd, doctor_cmd, clone_cmd
 
 
 class WyldGroup(click.Group):
@@ -108,6 +112,20 @@ def status_cmd(as_json: bool):
         return
 
     click.echo(f"Project: {data['project_name']}")
+    # Login identity for this project's remote (if any).
+    try:
+        from wyldfire.core import remotes as _remotes
+        from wyldfire.services import auth_service as _auth
+        _remote_name = project.config.get("remote")
+        if _remote_name:
+            _name, _url = _remotes.resolve_remote(_remote_name)
+            _entry = _auth.get_stored_auth(_name)
+            if _entry and _auth.session_is_valid(_entry):
+                click.echo(f"→ logged in as {_entry.get('username', '?')} ({_entry.get('role', '?')}) via remote \"{_name}\" ({_url})")
+            else:
+                click.echo("→ not logged in")
+    except Exception:
+        pass
     if data["checked_out_fire"]:
         click.echo(f"Focus fire: {data['checked_out_fire']}")
     else:
@@ -170,10 +188,12 @@ cli.add_command(tester)
 cli.add_command(metric)
 cli.add_command(identity)
 cli.add_command(token)
+cli.add_command(remote)
+cli.add_command(session)
+cli.add_command(req)
+cli.add_command(project_group)
 
 # Register sync commands
-cli.add_command(login_cmd)
-cli.add_command(logout_cmd)
 cli.add_command(clone_cmd)
 cli.add_command(link_cmd)
 cli.add_command(sync_cmd)

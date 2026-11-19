@@ -148,13 +148,18 @@ def test_cli_basic_workflow(tmp_path, monkeypatch):
     assert r.exit_code == 0
     assert "snapshot created" in r.output
 
-    # wyld login and logout
-    r = runner.invoke(cli, ["login", "--server", "https://wyld.example.com", "--token", "test-token"])
-    assert r.exit_code == 0
-    assert "credentials stored" in r.output
+    # wyld remote add/list (login moved under `wyld remote` in 0.2.0;
+    # top-level `wyld login` / `logout` no longer exist)
+    r = runner.invoke(cli, ["remote", "add", "main", "https://wyld.example.com"])
+    assert r.exit_code == 0, r.output
+    assert 'remote "main" added' in r.output
 
-    r = runner.invoke(cli, ["logout"])
+    r = runner.invoke(cli, ["remote", "list"])
     assert r.exit_code == 0
+    assert "main" in r.output and "https://wyld.example.com" in r.output
+
+    r = runner.invoke(cli, ["login", "--server", "https://wyld.example.com", "--token", "test-token"])
+    assert r.exit_code != 0  # top-level login was removed in 0.2.0
 
     # wyld doctor
     r = runner.invoke(cli, ["doctor"])
